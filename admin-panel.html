@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Gambl — Admin Panel</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial; background:#0f172a;color:#e6eef8;padding:24px}
+    .wrap{max-width:900px;margin:0 auto}
+    .card{background:#0b1220;border:1px solid rgba(255,255,255,0.03);padding:16px;border-radius:12px}
+    .grid{display:grid;gap:6px;margin-top:12px}
+    .cell{width:40px;height:40px;display:flex;align-items:center;justify-content:center;border-radius:6px;background:#0f172a;border:1px solid rgba(255,255,255,0.03);font-weight:700}
+    .bomb{background:linear-gradient(135deg,#ef4444,#dc2626);color:white}
+    .safe{background:linear-gradient(135deg,#10b981,#059669);color:white}
+    .controls{display:flex;gap:8px;align-items:center;margin-top:12px}
+    .muted{color:#93c5fdaa;font-size:13px}
+    button{background:#111827;border:none;color:white;padding:8px 12px;border-radius:8px;cursor:pointer}
+    input[type=number]{background:#0b1220;border:1px solid rgba(255,255,255,0.04);color:#dbeafe;padding:8px;border-radius:8px}
+    .notice{margin-top:12px;color:#c7f9d6}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Gambl — Admin Panel</h1>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div class="muted">Local inspection of last stored game bombs</div>
+          <div id="meta" class="muted" style="margin-top:6px"></div>
+        </div>
+        <div class="controls">
+          <label class="muted">Grid size</label>
+          <input id="gridSize" type="number" value="25" min="1" style="width:72px" />
+          <button id="load">Load</button>
+          <button id="clear">Clear stored bombs</button>
+        </div>
+      </div>
+
+      <div id="gridWrap" style="margin-top:14px"></div>
+
+      <div class="notice">This panel reads/writes the localStorage key <code>gambl_admin_bombs</code>. It's for debugging/demo only.</div>
+    </div>
+  </div>
+
+  <script>
+    function readData(){
+      try{
+        const raw = localStorage.getItem('gambl_admin_bombs');
+        if (!raw) return null;
+        return JSON.parse(raw);
+      }catch(e){ console.error(e); return null }
+    }
+
+    function renderGrid(data, size){
+      const gridWrap = document.getElementById('gridWrap');
+      gridWrap.innerHTML = '';
+      const grid = document.createElement('div');
+      grid.className = 'grid';
+      const cols = Math.min(size, Math.ceil(Math.sqrt(size)));
+      grid.style.gridTemplateColumns = `repeat(${Math.round(Math.sqrt(size))}, 40px)`;
+
+      const bombs = new Set((data && data.bombs) || []);
+      for (let i=0;i<size;i++){
+        const c = document.createElement('div');
+        c.className = 'cell ' + (bombs.has(i) ? 'bomb' : 'safe');
+        c.textContent = bombs.has(i) ? '💣' : '';
+        c.title = `Index: ${i}`;
+        grid.appendChild(c);
+      }
+      gridWrap.appendChild(grid);
+    }
+
+    document.getElementById('load').addEventListener('click', ()=>{
+      const size = Number(document.getElementById('gridSize').value) || 25;
+      const d = readData();
+      const meta = document.getElementById('meta');
+      if (!d){ meta.textContent = 'No gambl_admin_bombs key found in localStorage'; renderGrid(null,size); return; }
+      meta.textContent = `Stored bombs: ${d.bombs?.length ?? 0} • totalSize: ${d.size ?? 'unknown'}`;
+      renderGrid(d, d.size || size);
+    });
+
+    document.getElementById('clear').addEventListener('click', ()=>{
+      if (!confirm('Clear gambl_admin_bombs from localStorage?')) return;
+      localStorage.removeItem('gambl_admin_bombs');
+      document.getElementById('meta').textContent = 'Cleared';
+      renderGrid(null, Number(document.getElementById('gridSize').value) || 25);
+    });
+
+    // auto-load on open
+    document.getElementById('load').click();
+  </script>
+</body>
+</html>
