@@ -1080,7 +1080,8 @@
       const USERS = [
         { username: "daniel", password: "admin" },
         { username: "michael", password: "uwudemon69" },
-        { username: "admin", password: "admin" }
+        { username: "admin", password: "admin" },
+        { username: "kaydona", password: "kaydona" }
       ];
       // Auto-login from remembered user (localStorage) using stored username+password
       useEffect(()=>{
@@ -1107,7 +1108,10 @@
       useEffect(() => {
         function onKey(e){
           if (e.ctrlKey && e.shiftKey && (e.key === 'A' || e.key === 'a')){
-            if (!user || user.username !== 'daniel') return;
+            if (!user) return;
+            // Allow these demo admin users to open the admin panel via shortcut
+            const allowed = ['daniel', 'admin', 'michael', 'kaydona'];
+            if (!allowed.includes((user.username || '').toLowerCase())) return;
             // Open admin panel in a new window (relative path)
             try {
               window.open('admin-panel.html', '_blank', 'noopener');
@@ -1367,7 +1371,6 @@
                 Login
               </button>
             </form>
-            <div className="mt-4 text-xs text-slate-400 text-center">Demo users:<br/>daniel / admin<br/>michael / uwudemon69</div>
           </div>
         </div>
       );
