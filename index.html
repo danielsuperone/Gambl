@@ -478,9 +478,10 @@
   const crashInstanceRef = React.useRef(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
       const USERS = [
-        { username: "daniel", password: "admin" },
-        { username: "michael", password: "uwudemon69" },
-        { username: "admin", password: "admin" }
+  { username: "daniel", password: "admin" },
+  { username: "michael", password: "uwudemon69" },
+  { username: "admin", password: "admin" },
+  { username: "kajdona", password: "Attila123" }
       ];
       // Auto-login from remembered user (localStorage) using stored username+password
       useEffect(()=>{
@@ -889,7 +890,7 @@
 
     function MinesGame({ balance, setBalance }){
       const size = 5;
-      const [bet, setBet] = useState(50);
+  const [bet, setBet] = useState(50);
       const [mines, setMines] = useState(3);
       const [state, setState] = useState('idle');
       const [opened, setOpened] = useState([]);
@@ -957,6 +958,7 @@
       
       const start = async ()=>{
         if (state === 'active') return;
+        // Always use latest balance prop
         if (bet <= 0 || bet > balance) return;
         const indices = new Set();
         let i = 0;
@@ -975,7 +977,7 @@
         setOpened([]);
         setNonce(nonce+1);
         setState('active');
-        setBalance(balance - bet);
+        setBalance(b => b - bet); // Use functional update for latest value
         setRevealAll(false);
         setGameResult(null);
       };
@@ -1013,7 +1015,7 @@
         if (state !== 'active') return;
         const win = Math.floor(bet * multiplier);
         // Immediately apply winnings and mark cashed state
-        setBalance(b=>b+win);
+        setBalance(b => b + win); // Use functional update for latest value
         setState('cashed');
 
         // Show immediate game end popup with results
@@ -1392,7 +1394,7 @@
       const drop = async () => {
         if (bet <= 0 || isDropping) return;
 
-        // Auto mode: ensure enough balance for all balls
+        // Always use latest balance prop
         if (isAuto) {
           const totalCost = bet * numBalls;
           if (totalCost > balance) return;
@@ -1407,7 +1409,7 @@
         if (isAuto) {
           const totalCost = bet * numBalls;
           // Deduct total cost up front
-          setBalance(b => b - totalCost);
+          setBalance(b => b - totalCost); // Use functional update for latest value
 
           const sims = [];
           for (let i = 0; i < numBalls; i++) {
@@ -1446,7 +1448,7 @@
           }]);
 
           // Deduct bet
-          setBalance(b => b - bet);
+          setBalance(b => b - bet); // Use functional update for latest value
 
           await simulateBallDrop(ballId);
           setIsDropping(false);

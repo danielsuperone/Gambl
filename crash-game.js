@@ -39,7 +39,7 @@ export function initCrashGame(container, opts = {}){
   let crashPoint = 1;
   let startTs = 0;
   let last20 = [];
-  let balance = Number(opts.startBalance || 1000);
+  // Remove local balance, always use callbacks
   let bet = Number(opts.startBet || 10);
   let autoCash = Number(opts.autoCash || 0);
 
@@ -74,7 +74,7 @@ export function initCrashGame(container, opts = {}){
     <div class="top">
       <div>
         <div style="font-size:12px;color:#7fb7d8">Balance</div>
-        <div class="balance">€<span id="balance">${balance.toFixed(2)}</span></div>
+  <div class="balance">€<span id="balance">-</span></div>
       </div>
       <div style="text-align:right">
         <div style="font-size:12px;color:#7fb7d8">Round hash</div>
@@ -116,6 +116,13 @@ export function initCrashGame(container, opts = {}){
   const cashBtn = el('#cash');
   const muteBtn = el('#mute');
   const balanceEl = el('#balance');
+  function updateBalance(){
+    if (typeof opts.getBalance === 'function') {
+      balanceEl.textContent = Number(opts.getBalance()).toFixed(2);
+    } else {
+      balanceEl.textContent = '-';
+    }
+  }
   const multEl = el('#multVal');
   const chipsEl = el('#chips');
   const rocketEl = el('#rocket');
@@ -178,16 +185,17 @@ export function initCrashGame(container, opts = {}){
   }
 
   function start(){
-    if (running) return; // already running
-    // take bet
-    bet = Math.max(1, Number(betEl.value) || bet);
-    autoCash = Number(autoEl.value) || 0;
-    if (bet > balance) { alert('Insufficient balance'); return; }
-    balance -= bet; updateBalance();
-    nonce++;
-    newRound();
-    running = true; paused = false; startTs = performance.now();
-    loop(startTs);
+  if (running) return; // already running
+  bet = Math.max(1, Number(betEl.value) || bet);
+  autoCash = Number(autoEl.value) || 0;
+  let currentBalance = typeof opts.getBalance === 'function' ? Number(opts.getBalance()) : 0;
+  if (bet > currentBalance) { alert('Insufficient balance'); return; }
+  if (typeof opts.setBalance === 'function') opts.setBalance(currentBalance - bet);
+  updateBalance();
+  nonce++;
+  newRound();
+  running = true; paused = false; startTs = performance.now();
+  loop(startTs);
   }
 
   function loop(ts){
@@ -220,7 +228,20 @@ export function initCrashGame(container, opts = {}){
     raf = requestAnimationFrame(loop);
   }
 
-  function doCashout(auto=false){ if (!running) return; running = false; const winMult = multiplier; const payout = Math.floor((bet * winMult) * 100) / 100; balance += payout; updateBalance(); last20.unshift(Number(winMult.toFixed(2))); if (last20.length>20) last20.pop(); emit('cashout', { nonce, winMult, payout, auto }); showResult(true, winMult, payout); emit('roundEnd',{ nonce, winMult, payout }); }
+  function doCashout(auto=false){
+    if (!running) return;
+    running = false;
+    const winMult = multiplier;
+    const payout = Math.floor((bet * winMult) * 100) / 100;
+    let currentBalance = typeof opts.getBalance === 'function' ? Number(opts.getBalance()) : 0;
+    if (typeof opts.setBalance === 'function') opts.setBalance(currentBalance + payout);
+    updateBalance();
+    last20.unshift(Number(winMult.toFixed(2)));
+    if (last20.length>20) last20.pop();
+    emit('cashout', { nonce, winMult, payout, auto });
+    showResult(true, winMult, payout);
+    emit('roundEnd',{ nonce, winMult, payout });
+  }
 
   function onCrash(){ last20.unshift(0); if (last20.length>20) last20.pop(); showResult(false, 0, 0); emit('roundEnd',{ nonce, crashPoint }); }
 
@@ -239,6 +260,8 @@ export function initCrashGame(container, opts = {}){
   startBtn.addEventListener('click', start);
   cashBtn.addEventListener('click', ()=>doCashout(false));
   muteBtn.addEventListener('click', ()=>{ muteBtn.textContent = muteBtn.textContent === '🔈' ? '🔇' : '🔈'; });
+  // Always update balance display when shown
+  updateBalance();
 
   // hotkeys
   function onKey(e){ if (e.code === 'Space'){ e.preventDefault(); doCashout(false); } else if (e.key === 'Enter'){ start(); } }
