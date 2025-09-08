@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="description" content="Gambl - Fun and easy way to play">
   <title>Gambl</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -19,6 +21,14 @@
     .mine-tile:hover {
       transform: scale(1.05);
       background-color: #475569 !important;
+    }
+    
+    /* Touch devices - apply hover effect on active */
+    @media (hover: none) {
+      .mine-tile:active {
+        transform: scale(1.05);
+        background-color: #475569 !important;
+      }
     }
     
     .mine-tile.revealing {
@@ -60,6 +70,47 @@
     
     .animate-fade-in { animation: fadeIn 0.3s ease-out; }
     .animate-bounce-in { animation: bounceIn 0.6s ease-out; }
+    
+    /* Mobile optimization styles */
+    @media (max-width: 640px) {
+      input[type="number"],
+      input[type="text"],
+      input[type="password"],
+      select {
+        font-size: 16px; /* Prevents iOS zoom on input focus */
+      }
+      
+      .mobile-full {
+        width: 100%;
+      }
+      
+      .mobile-p-2 {
+        padding: 0.5rem;
+      }
+      
+      /* Improve touch targets */
+      .mobile-touch-target {
+        min-height: 44px;
+        min-width: 44px;
+      }
+    }
+    
+    /* Hide scrollbars but keep functionality */
+    .no-scrollbar {
+      -ms-overflow-style: none;  /* IE and Edge */
+      scrollbar-width: none;     /* Firefox */
+    }
+    
+    .no-scrollbar::-webkit-scrollbar {
+      display: none;  /* Chrome, Safari, Opera */
+    }
+    
+    /* Fix for iOS 100vh issue */
+    @supports (-webkit-touch-callout: none) {
+      .min-h-screen {
+        min-height: -webkit-fill-available;
+      }
+    }
   </style>
 </head>
 <body class="bg-slate-950">
@@ -470,6 +521,555 @@
     // include all commonly used React hooks so inline JSX (Babel) can reference them by name
     const { useState, useMemo, useEffect, useRef, useCallback, useLayoutEffect, useImperativeHandle, useReducer, forwardRef } = React;
 
+    // Enhanced BlackjackGame component with better card visuals, animations, and sounds
+    function BlackjackGame({ balance, onUpdateBalance }) {
+        // Use Web Audio API to synthesize short sounds (avoids unsupported base64 audio data issues)
+        const audioCtxRef = useRef(null);
+        useEffect(() => {
+          try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            audioCtxRef.current = new AudioContext();
+            // Try to resume if suspended (some browsers require user gesture)
+            if (audioCtxRef.current.state === 'suspended') {
+              const resume = () => { audioCtxRef.current && audioCtxRef.current.resume(); window.removeEventListener('pointerdown', resume); };
+              window.addEventListener('pointerdown', resume, { once: true });
+            }
+          } catch (e) {
+            audioCtxRef.current = null;
+          }
+        }, []);
+
+        // Simple WebAudio synth for short SFX
+        const playSound = (type) => {
+          const ctx = audioCtxRef.current;
+          if (!ctx) return;
+
+          const now = ctx.currentTime;
+
+          if (type === 'cardFlip') {
+            // short high-pitched click with a quick frequency sweep
+            const o = ctx.createOscillator();
+            const g = ctx.createGain();
+            o.type = 'triangle';
+            o.frequency.setValueAtTime(900, now);
+            o.frequency.exponentialRampToValueAtTime(450, now + 0.12);
+            g.gain.setValueAtTime(0.0001, now);
+            g.gain.exponentialRampToValueAtTime(0.35, now + 0.01);
+            g.gain.exponentialRampToValueAtTime(0.0001, now + 0.15);
+            o.connect(g); g.connect(ctx.destination);
+            o.start(now); o.stop(now + 0.18);
+          } else if (type === 'chip') {
+            // small percussive sound
+            const g = ctx.createGain();
+            const b = ctx.createBufferSource();
+            // create short noise buffer
+            const bufferSize = ctx.sampleRate * 0.06;
+            const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+            const data = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) data[i] = (Math.random() * 2 - 1) * 0.4 * (1 - i / bufferSize);
+            b.buffer = noiseBuffer;
+            g.gain.setValueAtTime(0.5, now);
+            g.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+            b.connect(g); g.connect(ctx.destination);
+            b.start(now); b.stop(now + 0.07);
+          } else if (type === 'win') {
+            // pleasant rising tone sequence
+            const o = ctx.createOscillator();
+            const g = ctx.createGain();
+            o.type = 'sine';
+            o.frequency.setValueAtTime(400, now);
+            o.frequency.linearRampToValueAtTime(880, now + 0.35);
+            g.gain.setValueAtTime(0.0001, now);
+            g.gain.linearRampToValueAtTime(0.35, now + 0.02);
+            g.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
+            o.connect(g); g.connect(ctx.destination);
+            o.start(now); o.stop(now + 0.55);
+          } else if (type === 'lose') {
+            // low thud
+            const o = ctx.createOscillator();
+            const g = ctx.createGain();
+            o.type = 'square';
+            o.frequency.setValueAtTime(120, now);
+            g.gain.setValueAtTime(0.4, now);
+            g.gain.exponentialRampToValueAtTime(0.0001, now + 0.4);
+            const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.setValueAtTime(300, now);
+            o.connect(lp); lp.connect(g); g.connect(ctx.destination);
+            o.start(now); o.stop(now + 0.45);
+          }
+        };
+      
+      // Helper function to get suit symbol
+      const getSuitSymbol = (suit) => {
+        switch (suit.toLowerCase()) {
+          case 'hearts': return '♥';
+          case 'diamonds': return '♦';
+          case 'clubs': return '♣';
+          case 'spades': return '♠';
+          default: return suit.charAt(0);
+        }
+      };
+      
+      // Helper function to get card color
+      const getCardColor = (suit) => {
+        return ['hearts', 'diamonds'].includes(suit.toLowerCase()) ? 'text-red-600' : 'text-black';
+      };
+      
+      // Function to generate a random card
+      const generateRandomCard = () => {
+        const suits = ['hearts', 'diamonds', 'clubs', 'spades'];
+        const ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'];
+        const suit = suits[Math.floor(Math.random() * suits.length)];
+        const rank = ranks[Math.floor(Math.random() * ranks.length)];
+        const value = rank === 'A' ? 11 : ['J', 'Q', 'K'].includes(rank) ? 10 : parseInt(rank);
+        return { suit, rank, value, revealed: true };
+      };
+      
+      // Game state
+      const [gameState, setGameState] = useState({
+        playerCards: [],
+        dealerCards: [],
+        dealerSecondCardRevealed: false,
+        currentBet: 10,
+        status: 'betting', // betting, dealing, playing, dealerTurn, complete
+        result: null,
+        dealingCard: null, // Used for animation
+        animatingCard: false
+      });
+      
+      // Refs for card animation
+      const cardRefs = useRef({});
+      
+      // Handle dealing animation
+      useEffect(() => {
+        if (gameState.dealingCard) {
+          const timer = setTimeout(() => {
+            setGameState(prev => ({ ...prev, dealingCard: null, animatingCard: false }));
+          }, 500); // Animation duration
+          return () => clearTimeout(timer);
+        }
+      }, [gameState.dealingCard]);
+      
+      // Place a bet and start the game
+      const placeBet = (amount) => {
+        if (amount > balance) return;
+        
+        // Play chip sound
+        playSound('chip');
+        
+        // Deduct bet amount
+        onUpdateBalance(-amount, 'blackjack-bet');
+        
+        // Start dealing animation sequence
+        setGameState(prev => ({
+          ...prev,
+          currentBet: amount,
+          status: 'dealing',
+          playerCards: [],
+          dealerCards: [],
+          result: null,
+          dealerSecondCardRevealed: false
+        }));
+        
+        // Deal cards with animation delay
+        setTimeout(() => dealPlayerCard(), 300);
+        setTimeout(() => dealDealerCard(true), 800);
+        setTimeout(() => dealPlayerCard(), 1300);
+        setTimeout(() => dealDealerCard(false), 1800);
+        setTimeout(() => {
+          setGameState(prev => ({ ...prev, status: 'playing' }));
+        }, 2300);
+      };
+      
+      // Deal a card to player with animation
+      const dealPlayerCard = () => {
+        const card = generateRandomCard();
+        playSound('cardFlip');
+        
+        setGameState(prev => ({
+          ...prev,
+          dealingCard: {target: 'player', card},
+          animatingCard: true,
+          playerCards: [...prev.playerCards, card]
+        }));
+      };
+      
+      // Deal a card to dealer with animation
+      const dealDealerCard = (revealed) => {
+        const card = generateRandomCard();
+        card.revealed = revealed;
+        playSound('cardFlip');
+        
+        setGameState(prev => ({
+          ...prev,
+          dealingCard: {target: 'dealer', card},
+          animatingCard: true,
+          dealerCards: [...prev.dealerCards, card]
+        }));
+      };
+      
+      // Hit - Deal another card to player
+      const hitMe = () => {
+        if (gameState.animatingCard) return;
+        
+        dealPlayerCard();
+        
+        // Check if player busts
+        setTimeout(() => {
+          const playerTotal = calculateHandValue(
+            [...gameState.playerCards, generateRandomCard()]
+          );
+          
+          if (playerTotal > 21) {
+            // Player busts
+            setGameState(prev => ({
+              ...prev, 
+              status: 'dealerTurn',
+              dealerSecondCardRevealed: true
+            }));
+            
+            setTimeout(() => {
+              playSound('lose');
+              setGameState(prev => ({ ...prev, status: 'complete', result: 'lose' }));
+            }, 1000);
+          }
+        }, 500);
+      };
+      
+      // Stand - End player's turn and start dealer's turn
+      const stand = () => {
+        if (gameState.animatingCard) return;
+        
+        setGameState(prev => ({
+          ...prev,
+          status: 'dealerTurn',
+          dealerSecondCardRevealed: true
+        }));
+        
+        // Reveal dealer's hole card with animation
+        playSound('cardFlip');
+        
+        // Dealer draws until 17 or higher
+        setTimeout(() => {
+          let currentDealerCards = [...gameState.dealerCards];
+          currentDealerCards[1].revealed = true;
+          
+          const dealerValue = calculateHandValue(currentDealerCards);
+          
+          // If dealer has less than 17, draw more cards
+          if (dealerValue < 17) {
+            const newCard = generateRandomCard();
+            playSound('cardFlip');
+            currentDealerCards.push(newCard);
+          }
+          
+          const finalDealerValue = calculateHandValue(currentDealerCards);
+          const playerValue = calculateHandValue(gameState.playerCards);
+          
+          let result = 'lose';
+          let payout = 0;
+          
+          // Determine winner
+          if (finalDealerValue > 21 || playerValue > finalDealerValue) {
+            result = 'win';
+            payout = gameState.currentBet * 2; // Original bet + winnings
+            playSound('win');
+          } else if (playerValue === finalDealerValue) {
+            result = 'push';
+            payout = gameState.currentBet; // Return original bet
+            playSound('win');
+          } else {
+            playSound('lose');
+          }
+          
+          // Update balance if win or push
+          if (payout > 0) {
+            onUpdateBalance(payout, `blackjack-${result}`);
+          }
+          
+          setGameState(prev => ({ 
+            ...prev, 
+            status: 'complete', 
+            result,
+            dealerCards: currentDealerCards
+          }));
+        }, 1000);
+      };
+      
+      // Calculate hand value considering Aces
+      const calculateHandValue = (cards) => {
+        let total = 0;
+        let aces = 0;
+        
+        cards.forEach(card => {
+          if (card.revealed) {
+            if (card.rank === 'A') {
+              aces++;
+              total += 11;
+            } else {
+              total += card.value;
+            }
+          }
+        });
+        
+        // Adjust for Aces if over 21
+        while (total > 21 && aces > 0) {
+          total -= 10; // Convert an Ace from 11 to 1
+          aces--;
+        }
+        
+        return total;
+      };
+      
+      // Get hand display value
+      const getHandValue = (cards, hideSecond = false) => {
+        if (cards.length === 0) return '';
+        
+        if (hideSecond && cards.length > 1) {
+          // Only count visible cards
+          const visibleCards = [cards[0]];
+          return calculateHandValue(visibleCards);
+        }
+        
+        return calculateHandValue(cards);
+      };
+      
+      // Start a new game
+      const playAgain = () => {
+        setGameState({
+          playerCards: [],
+          dealerCards: [],
+          dealerSecondCardRevealed: false,
+          currentBet: 10,
+          status: 'betting',
+          result: null,
+          dealingCard: null,
+          animatingCard: false
+        });
+      };
+      
+      // Rendering the 3D card
+      const Card = ({ card, index, isDealing = false, type }) => {
+        if (!card) return null;
+        
+        const isAnimating = gameState.dealingCard && 
+                           gameState.dealingCard.target === type && 
+                           index === (type === 'player' ? gameState.playerCards.length - 1 : gameState.dealerCards.length - 1);
+        
+        const cardClasses = `
+          relative w-24 h-36 rounded-lg shadow-lg 
+          ${isAnimating ? 'animate-card-deal' : ''} 
+          transform transition-all duration-300
+          ${card.revealed ? 'bg-white' : 'bg-blue-700 bg-opacity-90'}
+          hover:shadow-xl hover:-translate-y-1
+          flex flex-col justify-center items-center
+          border-2 border-gray-200
+          ${getCardColor(card.suit)}
+        `;
+        
+        return (
+          <div 
+            className={cardClasses}
+            style={{ 
+              perspective: '1000px',
+              transformStyle: 'preserve-3d',
+              animation: isAnimating ? 'dealCard 0.5s ease-out forwards' : '',
+            }}
+            ref={el => {
+              if (el) cardRefs.current[`${type}-${index}`] = el;
+            }}
+          >
+            {card.revealed ? (
+              <>
+                <div className="absolute top-2 left-2 text-xl font-bold">
+                  {card.rank}
+                </div>
+                <div className="text-4xl">
+                  {getSuitSymbol(card.suit)}
+                </div>
+                <div className="absolute bottom-2 right-2 text-xl font-bold rotate-180">
+                  {card.rank}
+                </div>
+              </>
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                <div className="text-2xl text-white">🂠</div>
+              </div>
+            )}
+          </div>
+        );
+      };
+      
+      return (
+        <div className="w-full max-w-4xl mx-auto p-6 bg-gradient-to-b from-slate-800 to-slate-900 rounded-lg shadow-2xl">
+          <style>
+            {`
+              @keyframes dealCard {
+                0% { transform: translateY(-100px) translateX(-100px) rotateY(180deg); opacity: 0; }
+                100% { transform: translateY(0) translateX(0) rotateY(0); opacity: 1; }
+              }
+              .animate-card-deal {
+                animation: dealCard 0.5s ease-out forwards;
+              }
+              .card-table {
+                background: linear-gradient(to bottom, #1a5c2e, #0f3d1e);
+                border-radius: 16px;
+                box-shadow: inset 0 0 50px rgba(0,0,0,0.5);
+                position: relative;
+                overflow: hidden;
+              }
+              .card-table::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: url("data:image/svg+xml,%3Csvg width='100' height='100' viewBox='0 0 100 100' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M11 18c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm48 25c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm-43-7c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm63 31c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM34 90c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm56-76c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM12 86c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm28-65c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm23-11c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-6 60c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm29 22c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zM32 63c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm57-13c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-9-21c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM60 91c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM35 41c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM12 60c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2z' fill='%23184e27' fill-opacity='0.1' fill-rule='evenodd'/%3E%3C/svg%3E");
+                opacity: 0.5;
+              }
+            `}
+          </style>
+          
+          <h2 className="text-3xl font-bold mb-6 text-center text-white drop-shadow-lg">
+            <span className="text-red-500">♥</span> 
+            <span className="mx-1">Blackjack</span>
+            <span className="text-black">♠</span>
+          </h2>
+          
+          {gameState.status === 'betting' ? (
+            <div className="flex flex-col items-center gap-6 py-8">
+              <div className="text-lg text-gray-200 bg-black bg-opacity-30 px-6 py-3 rounded-full">
+                Your balance: <span className="font-bold text-green-400">${balance.toFixed(2)}</span>
+              </div>
+              
+              <div className="flex flex-col items-center">
+                <p className="text-gray-300 mb-3">Select your bet:</p>
+                <div className="flex flex-wrap gap-4 justify-center">
+                  {[10, 25, 50, 100, 500].map((amount) => (
+                    <button 
+                      key={amount}
+                      onClick={() => placeBet(amount)} 
+                      disabled={amount > balance}
+                      className={`
+                        relative group flex items-center justify-center 
+                        w-24 h-24 rounded-full transition-all 
+                        ${amount > balance ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:scale-110'}
+                      `}
+                    >
+                      <div className={`
+                        absolute inset-0 rounded-full shadow-lg transition-all duration-300
+                        ${amount === 10 ? 'bg-red-600' : ''}
+                        ${amount === 25 ? 'bg-green-600' : ''}
+                        ${amount === 50 ? 'bg-blue-600' : ''}
+                        ${amount === 100 ? 'bg-purple-600' : ''}
+                        ${amount === 500 ? 'bg-yellow-600' : ''}
+                        group-hover:shadow-xl
+                      `}></div>
+                      <div className={`
+                        absolute inset-2 rounded-full border-2 border-white border-opacity-20
+                        ${amount === 10 ? 'bg-red-500' : ''}
+                        ${amount === 25 ? 'bg-green-500' : ''}
+                        ${amount === 50 ? 'bg-blue-500' : ''}
+                        ${amount === 100 ? 'bg-purple-500' : ''}
+                        ${amount === 500 ? 'bg-yellow-500' : ''}
+                      `}></div>
+                      <span className="relative font-bold text-white text-lg">
+                        ${amount}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-8">
+              {/* Game table */}
+              <div className="card-table p-8 min-h-[400px]">
+                {/* Dealer's area */}
+                <div className="mb-12">
+                  <div className="flex items-center mb-4">
+                    <p className="text-white text-lg font-semibold mr-3">Dealer's Hand</p>
+                    {gameState.dealerSecondCardRevealed && (
+                      <span className="bg-slate-700 bg-opacity-75 px-3 py-1 rounded-full text-white">
+                        {getHandValue(gameState.dealerCards)}
+                      </span>
+                    )}
+                  </div>
+                  
+                  <div className="flex gap-3">
+                    {gameState.dealerCards.map((card, i) => (
+                      <Card key={i} card={card} index={i} type="dealer" />
+                    ))}
+                  </div>
+                </div>
+                
+                {/* Player's area */}
+                <div>
+                  <div className="flex items-center mb-4">
+                    <p className="text-white text-lg font-semibold mr-3">Your Hand</p>
+                    <span className="bg-slate-700 bg-opacity-75 px-3 py-1 rounded-full text-white">
+                      {getHandValue(gameState.playerCards)}
+                    </span>
+                  </div>
+                  
+                  <div className="flex gap-3">
+                    {gameState.playerCards.map((card, i) => (
+                      <Card key={i} card={card} index={i} type="player" />
+                    ))}
+                  </div>
+                </div>
+              </div>
+              
+              {/* Game controls */}
+              <div className="flex flex-col items-center gap-4">
+                {gameState.status === 'playing' && (
+                  <div className="flex gap-4">
+                    <button 
+                      onClick={hitMe}
+                      className="px-8 py-3 bg-gradient-to-r from-green-600 to-green-700 text-white rounded-lg shadow-lg hover:from-green-500 hover:to-green-600 font-bold"
+                    >
+                      Hit
+                    </button>
+                    <button 
+                      onClick={stand}
+                      className="px-8 py-3 bg-gradient-to-r from-amber-600 to-amber-700 text-white rounded-lg shadow-lg hover:from-amber-500 hover:to-amber-600 font-bold"
+                    >
+                      Stand
+                    </button>
+                  </div>
+                )}
+                
+                {gameState.status === 'complete' && (
+                  <div className="flex flex-col items-center gap-4">
+                    <div className={`
+                      text-2xl font-bold py-3 px-8 rounded-lg
+                      ${gameState.result === 'win' ? 'bg-green-700 text-white' : ''}
+                      ${gameState.result === 'push' ? 'bg-yellow-600 text-white' : ''}
+                      ${gameState.result === 'lose' ? 'bg-red-700 text-white' : ''}
+                    `}>
+                      {gameState.result === 'win' ? '💰 You Win!' : 
+                       gameState.result === 'push' ? '🤝 Push!' : '❌ Dealer Wins!'}
+                    </div>
+                    
+                    <button 
+                      onClick={playAgain}
+                      className="px-8 py-3 bg-gradient-to-r from-blue-600 to-indigo-700 text-white rounded-lg shadow-lg hover:from-blue-500 hover:to-indigo-600 font-bold"
+                    >
+                      Play Again
+                    </button>
+                  </div>
+                )}
+                
+                <div className="text-gray-300 mt-2">
+                  Current bet: <span className="font-bold text-yellow-400">${gameState.currentBet}</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
     function App() {
       const [tab, setTab] = useState("mines");
       const [balance, setBalance] = useState(1000);
@@ -478,10 +1078,9 @@
   const crashInstanceRef = React.useRef(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
       const USERS = [
-  { username: "daniel", password: "admin" },
-  { username: "michael", password: "uwudemon69" },
-  { username: "admin", password: "admin" },
-  { username: "kajdona", password: "Attila123" }
+        { username: "daniel", password: "admin" },
+        { username: "michael", password: "uwudemon69" },
+        { username: "admin", password: "admin" }
       ];
       // Auto-login from remembered user (localStorage) using stored username+password
       useEffect(()=>{
@@ -572,51 +1171,80 @@
       }
       
       return (
-        <div className="min-h-screen bg-slate-950 text-slate-50 p-6">
+        <div className="min-h-screen bg-slate-950 text-slate-50 p-2 sm:p-6">
           <div className="max-w-7xl mx-auto relative">
             {/* Fixed left sidebar (edge of screen) */}
-            <aside className={`fixed left-0 top-0 h-full w-56 bg-slate-900 p-4 z-50 transform transition-transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-56'} md:translate-x-0` }>
-              <div className="mb-4 text-slate-300 font-bold">Games</div>
+            <aside className={`fixed left-0 top-0 h-full w-64 sm:w-56 bg-slate-900 p-4 z-50 transform transition-transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-64 sm:-translate-x-56'} md:translate-x-0 overflow-y-auto`}>
+              <div className="flex justify-between items-center mb-4">
+                <div className="text-slate-300 font-bold">Games</div>
+                <button 
+                  onClick={() => setSidebarOpen(false)} 
+                  className="md:hidden p-2 text-slate-400 hover:text-white"
+                  aria-label="Close sidebar"
+                >
+                  ✕
+                </button>
+              </div>
               <div className="flex flex-col gap-2">
-                <button onClick={()=>{ setTab('mines'); setSidebarOpen(false); }} className={`text-left px-3 py-2 rounded-xl ${tab==='mines'?'bg-slate-800 text-white':'text-slate-300 hover:bg-slate-800/60'}`}>Mines</button>
-                <button onClick={()=>{ setTab('plinko'); setSidebarOpen(false); }} className={`text-left px-3 py-2 rounded-xl ${tab==='plinko'?'bg-slate-800 text-white':'text-slate-300 hover:bg-slate-800/60'}`}>Plinko</button>
-                <button onClick={()=>{ setTab('crash'); setSidebarOpen(false); }} className={`text-left px-3 py-2 rounded-xl ${tab==='crash'?'bg-slate-800 text-white':'text-slate-300 hover:bg-slate-800/60'}`}>Crash</button>
+                <button onClick={()=>{ setTab('mines'); setSidebarOpen(false); }} className={`text-left px-3 py-3 rounded-xl mobile-touch-target ${tab==='mines'?'bg-slate-800 text-white':'text-slate-300 hover:bg-slate-800/60'}`}>Mines</button>
+                <button onClick={()=>{ setTab('plinko'); setSidebarOpen(false); }} className={`text-left px-3 py-3 rounded-xl mobile-touch-target ${tab==='plinko'?'bg-slate-800 text-white':'text-slate-300 hover:bg-slate-800/60'}`}>Plinko</button>
+                <button onClick={()=>{ setTab('crash'); setSidebarOpen(false); }} className={`text-left px-3 py-3 rounded-xl mobile-touch-target ${tab==='crash'?'bg-slate-800 text-white':'text-slate-300 hover:bg-slate-800/60'}`}>Crash</button>
+                <button onClick={()=>{ setTab('blackjack'); setSidebarOpen(false); }} className={`text-left px-3 py-3 rounded-xl mobile-touch-target ${tab==='blackjack'?'bg-slate-800 text-white':'text-slate-300 hover:bg-slate-800/60'}`}>Blackjack</button>
               </div>
             </aside>
 
             {/* overlay for mobile when sidebar open */}
             <div onClick={()=>setSidebarOpen(false)} className={`fixed inset-0 bg-black/40 z-40 md:hidden ${sidebarOpen? 'block':'hidden'}`}></div>
 
-            <main className={`md:ml-56 p-6` }>
-              <div className="space-y-6">
-                <header className="flex items-center justify-between gap-4">
+            <main className={`md:ml-56 p-2 sm:p-6`}>
+              <div className="space-y-4 sm:space-y-6">
+                <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-4">
                   <div className="flex items-center gap-3">
                     {/* mobile hamburger */}
-                    <button onClick={()=>setSidebarOpen(s=>!s)} className="md:hidden p-2 rounded bg-slate-800 text-slate-200">☰</button>
+                    <button 
+                      onClick={()=>setSidebarOpen(s=>!s)} 
+                      className="md:hidden p-2 rounded bg-slate-800 text-slate-200 mobile-touch-target"
+                      aria-label="Open menu"
+                    >
+                      ☰
+                    </button>
                     <div>
-                      <h1 className="text-3xl font-semibold tracking-tight">Gambl - Fun and easy way to play</h1>
-                      <p className="text-slate-400">We do it in our fun and easy style for anyone over 18 to play</p>
+                      <h1 className="text-xl sm:text-2xl md:text-3xl font-semibold tracking-tight">Gambl - Fun and easy way to play</h1>
+                      <p className="text-sm sm:text-base text-slate-400">We do it in our fun and easy style for anyone over 18 to play</p>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-4">
+                  <div className="flex items-center justify-between sm:justify-end gap-2 sm:gap-4 mt-3 sm:mt-0">
                     <Wallet balance={balance} onAdd={a=>setBalance(b=>b+a)} user={user} />
                     <div className="hidden sm:flex items-center gap-3">
                       <span className="bg-gradient-to-r from-blue-600 to-emerald-500 text-white px-3 sm:px-4 py-2 rounded-2xl text-base font-semibold shadow-lg border border-white/10" style={{boxShadow:'0 2px 12px #0ea5e9a0'}}>
                         {user.username.charAt(0).toUpperCase() + user.username.slice(1)}
                       </span>
-                      <button onClick={signOut} className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-sm font-medium text-white">Sign Out</button>
+                      <button onClick={signOut} className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-sm font-medium text-white mobile-touch-target">Sign Out</button>
                     </div>
                     {/* on very small screens keep sign out accessible */}
                     <div className="sm:hidden">
-                      <button onClick={signOut} className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-sm font-medium text-white">Sign</button>
+                      <button onClick={signOut} className="px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-500 text-sm font-medium text-white mobile-touch-target">Sign Out</button>
                     </div>
                   </div>
                 </header>
-            <nav className="inline-flex rounded-2xl bg-slate-800/60 p-1 shadow-sm">
-              {[{ id: "mines", label: "Mines" },{ id: "plinko", label: "Plinko" }, { id: "crash", label: "Crash" }].map(t => (
-                <button key={t.id} onClick={()=>setTab(t.id)} className={`px-4 py-2 rounded-xl text-sm transition ${tab===t.id?"bg-slate-700":"hover:bg-slate-800"}`}>{t.label}</button>
-              ))}
+            <nav className="overflow-x-auto overflow-y-hidden py-1 no-scrollbar">
+              <div className="inline-flex rounded-2xl bg-slate-800/60 p-1 shadow-sm">
+                {[
+                  { id: "mines", label: "Mines" },
+                  { id: "plinko", label: "Plinko" }, 
+                  { id: "crash", label: "Crash" },
+                  { id: "blackjack", label: "Blackjack" }
+                ].map(t => (
+                  <button 
+                    key={t.id} 
+                    onClick={()=>setTab(t.id)} 
+                    className={`px-4 py-3 rounded-xl text-sm transition mobile-touch-target ${tab===t.id?"bg-slate-700":"hover:bg-slate-800"}`}
+                  >
+                    {t.label}
+                  </button>
+                ))}
+              </div>
             </nav>
             <div className="w-full flex flex-col items-center justify-center" style={{minHeight: 'calc(100vh - 260px)'}}>
               <div className="flex flex-col items-center justify-center w-full">
@@ -624,16 +1252,25 @@
                   <MinesGame balance={balance} setBalance={setBalance} />
                 ) : tab === 'plinko' ? (
                   <PlinkoGame balance={balance} setBalance={setBalance} />
+                ) : tab === 'blackjack' ? (
+                  <div className="w-full max-w-5xl mx-auto">
+                    <BlackjackGame 
+                      balance={balance} 
+                      onUpdateBalance={(amount, reason) => {
+                        setBalance(prev => prev + amount);
+                      }}
+                    />
+                  </div>
                 ) : (
-                  <div className="w-full">
-                    <div id="crash-root" ref={crashRootRef} />
+                  <div className="w-full overflow-x-auto">
+                    <div id="crash-root" ref={crashRootRef} className="min-w-full" />
                   </div>
                 )}
               </div>
             </div>
           </div>
         </main>
-            <footer className="text-xs text-slate-500 pt-6 border-t border-slate-800">
+            <footer className="text-xs text-slate-500 pt-4 sm:pt-6 mt-4 sm:mt-6 border-t border-slate-800 text-center sm:text-left">
               Gambling involves risk. Please play responsibly. Only wager what you can afford to lose.
             </footer>
           </div>
@@ -683,25 +1320,54 @@
         }
       };
       return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
-          <div className="bg-slate-900 rounded-2xl p-8 shadow-lg w-full max-w-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="bg-slate-900 rounded-2xl p-6 sm:p-8 shadow-lg w-full max-w-sm">
             <h2 className="text-2xl font-bold mb-4 text-center text-slate-100">Login</h2>
             <form className="space-y-4" onSubmit={handleSubmit} autoComplete="on">
               <div>
                 <label className="block text-sm text-slate-400 mb-1">Username</label>
-                <input name="username" autoComplete="username" type="text" value={form.username} onChange={handleChange} className="w-full bg-slate-800 rounded-lg px-3 py-2 outline-none" required />
+                <input 
+                  name="username" 
+                  autoComplete="username" 
+                  type="text" 
+                  value={form.username} 
+                  onChange={handleChange} 
+                  className="w-full bg-slate-800 rounded-lg px-3 py-3 outline-none mobile-touch-target" 
+                  required 
+                />
               </div>
               <div>
                 <label className="block text-sm text-slate-400 mb-1">Password</label>
-                <input name="password" autoComplete="current-password" type="password" value={form.password} onChange={handleChange} className="w-full bg-slate-800 rounded-lg px-3 py-2 outline-none" required />
+                <input 
+                  name="password" 
+                  autoComplete="current-password" 
+                  type="password" 
+                  value={form.password} 
+                  onChange={handleChange} 
+                  className="w-full bg-slate-800 rounded-lg px-3 py-3 outline-none mobile-touch-target" 
+                  required 
+                />
               </div>
               <div className="flex items-center gap-2">
-                <input id="remember" name="remember" type="checkbox" checked={form.remember} onChange={handleChange} className="h-4 w-4" />
+                <input 
+                  id="remember" 
+                  name="remember" 
+                  type="checkbox" 
+                  checked={form.remember} 
+                  onChange={handleChange} 
+                  className="h-5 w-5 mobile-touch-target" 
+                />
                 <label htmlFor="remember" className="text-sm text-slate-400">Remember me</label>
               </div>
               {error && <div className="text-rose-400 text-sm text-center">{error}</div>}
-              <button type="submit" className="w-full px-3 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-emerald-500 hover:from-blue-500 hover:to-emerald-400 text-sm font-semibold text-white shadow transition">Login</button>
+              <button 
+                type="submit" 
+                className="w-full px-3 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-emerald-500 hover:from-blue-500 hover:to-emerald-400 text-sm font-semibold text-white shadow transition mobile-touch-target"
+              >
+                Login
+              </button>
             </form>
+            <div className="mt-4 text-xs text-slate-400 text-center">Demo users:<br/>daniel / admin<br/>michael / uwudemon69</div>
           </div>
         </div>
       );
@@ -710,11 +1376,16 @@
   function Wallet({ balance, onAdd, user }) {
       const [showModal, setShowModal] = useState(false);
       return (
-        <div className="flex items-center gap-3 bg-slate-900 rounded-2xl px-4 py-2 shadow">
-          <span className="text-sm text-slate-400">Balance</span>
-          <span className="text-lg font-semibold tabular-nums">€{balance.toLocaleString()}</span>
+        <div className="flex items-center gap-2 sm:gap-3 bg-slate-900 rounded-2xl px-2 sm:px-4 py-2 shadow">
+          <span className="text-xs sm:text-sm text-slate-400">Balance</span>
+          <span className="text-sm sm:text-lg font-semibold tabular-nums">€{balance.toLocaleString()}</span>
           <div className="h-6 w-px bg-slate-700" />
-          <button onClick={()=>setShowModal(true)} className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-medium">Top Up</button>
+          <button 
+            onClick={()=>setShowModal(true)} 
+            className="px-2 sm:px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-medium mobile-touch-target"
+          >
+            Top Up
+          </button>
           {showModal && <TopUpModal onClose={()=>setShowModal(false)} onAdd={onAdd} user={user} />}
         </div>
       );
@@ -793,24 +1464,50 @@
       };
 
       return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-          <div className="bg-slate-900 rounded-2xl p-6 shadow-lg w-full max-w-md relative">
-            <button onClick={onClose} className="absolute top-3 right-3 text-slate-400 hover:text-slate-200 text-xl">×</button>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="bg-slate-900 rounded-2xl p-4 sm:p-6 shadow-lg w-full max-w-md relative">
+            <button 
+              onClick={onClose} 
+              className="absolute top-3 right-3 text-slate-400 hover:text-slate-200 text-xl p-2 mobile-touch-target"
+              aria-label="Close"
+            >
+              ×
+            </button>
             <h2 className="text-xl font-semibold mb-4">Top Up Credits</h2>
             <form className="space-y-3" onSubmit={handleSubmit} autoComplete="off">
               <div>
                 <label className="block text-sm text-slate-400 mb-1">Card Number</label>
-                <input name="number" type="text" maxLength={19} placeholder="4242 4242 4242 4242" value={form.number} onChange={handleChange} className="w-full bg-slate-800 rounded-lg px-3 py-2 outline-none" required />
+                <input 
+                  name="number" 
+                  type="text" 
+                  inputMode="numeric" 
+                  maxLength={19} 
+                  placeholder="4242 4242 4242 4242" 
+                  value={form.number} 
+                  onChange={handleChange} 
+                  className="w-full bg-slate-800 rounded-lg px-3 py-3 outline-none" 
+                  required 
+                />
               </div>
-              <div className="flex gap-3">
+              <div className="flex flex-col sm:flex-row gap-3">
                 <div className="flex-1">
                   <label className="block text-sm text-slate-400 mb-1">Expiry</label>
                   <div className="flex gap-2">
-                    <select name="month" value={form.month} onChange={handleChange} className="bg-slate-800 rounded-lg px-2 py-2 outline-none">
+                    <select 
+                      name="month" 
+                      value={form.month} 
+                      onChange={handleChange} 
+                      className="bg-slate-800 rounded-lg px-2 py-3 outline-none flex-1 mobile-touch-target"
+                    >
                       <option value="">Month</option>
                       {months.map(m=> <option key={m} value={m}>{m}</option>)}
                     </select>
-                    <select name="year" value={form.year} onChange={handleChange} className="bg-slate-800 rounded-lg px-2 py-2 outline-none">
+                    <select 
+                      name="year" 
+                      value={form.year} 
+                      onChange={handleChange} 
+                      className="bg-slate-800 rounded-lg px-2 py-3 outline-none flex-1 mobile-touch-target"
+                    >
                       <option value="">Year</option>
                       {years.map(y=> <option key={y} value={y}>{y}</option>)}
                     </select>
@@ -818,18 +1515,53 @@
                 </div>
                 <div className="flex-1">
                   <label className="block text-sm text-slate-400 mb-1">CVV</label>
-                  <input name="cvv" type="text" maxLength={3} placeholder="123" value={form.cvv} onChange={handleChange} className="w-full bg-slate-800 rounded-lg px-3 py-2 outline-none" required />
+                  <input 
+                    name="cvv" 
+                    type="text" 
+                    inputMode="numeric"
+                    pattern="[0-9]*" 
+                    maxLength={3} 
+                    placeholder="123" 
+                    value={form.cvv} 
+                    onChange={handleChange} 
+                    className="w-full bg-slate-800 rounded-lg px-3 py-3 outline-none" 
+                    required 
+                  />
                 </div>
               </div>
               <div>
                 <label className="block text-sm text-slate-400 mb-1">Name on Card</label>
-                <input name="name" type="text" placeholder="Full Name" value={form.name} onChange={handleChange} className="w-full bg-slate-800 rounded-lg px-3 py-2 outline-none" required />
+                <input 
+                  name="name" 
+                  type="text" 
+                  placeholder="Full Name" 
+                  value={form.name} 
+                  onChange={handleChange} 
+                  className="w-full bg-slate-800 rounded-lg px-3 py-3 outline-none" 
+                  required 
+                />
               </div>
               <div>
                 <label className="block text-sm text-slate-400 mb-1">Amount (max 2000)</label>
-                <input name="amount" type="number" min={1} max={2000} placeholder="Amount" value={form.amount} onChange={handleChange} className="w-full bg-slate-800 rounded-lg px-3 py-2 outline-none" required />
+                <input 
+                  name="amount" 
+                  type="number" 
+                  inputMode="decimal"
+                  min={1} 
+                  max={2000} 
+                  placeholder="Amount" 
+                  value={form.amount} 
+                  onChange={handleChange} 
+                  className="w-full bg-slate-800 rounded-lg px-3 py-3 outline-none" 
+                  required 
+                />
               </div>
-              <button type="submit" className="w-full px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-medium mt-2">Pay</button>
+              <button 
+                type="submit" 
+                className="w-full px-3 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-medium mt-2 mobile-touch-target"
+              >
+                Pay
+              </button>
             </form>
             {anim && (
               <div className="flex flex-col items-center justify-center mt-6">
@@ -890,7 +1622,7 @@
 
     function MinesGame({ balance, setBalance }){
       const size = 5;
-  const [bet, setBet] = useState(50);
+      const [bet, setBet] = useState(50);
       const [mines, setMines] = useState(3);
       const [state, setState] = useState('idle');
       const [opened, setOpened] = useState([]);
@@ -958,7 +1690,6 @@
       
       const start = async ()=>{
         if (state === 'active') return;
-        // Always use latest balance prop
         if (bet <= 0 || bet > balance) return;
         const indices = new Set();
         let i = 0;
@@ -977,7 +1708,7 @@
         setOpened([]);
         setNonce(nonce+1);
         setState('active');
-        setBalance(b => b - bet); // Use functional update for latest value
+        setBalance(balance - bet);
         setRevealAll(false);
         setGameResult(null);
       };
@@ -1015,7 +1746,7 @@
         if (state !== 'active') return;
         const win = Math.floor(bet * multiplier);
         // Immediately apply winnings and mark cashed state
-        setBalance(b => b + win); // Use functional update for latest value
+        setBalance(b=>b+win);
         setState('cashed');
 
         // Show immediate game end popup with results
@@ -1060,22 +1791,52 @@
       
       return (
         <section className="flex flex-col items-center justify-center w-full">
-          <div className="bg-slate-900 rounded-2xl p-4 shadow space-y-4 w-full max-w-md mx-auto">
+          <div className="bg-slate-900 rounded-2xl p-3 sm:p-4 shadow space-y-3 sm:space-y-4 w-full max-w-md mx-auto">
             <h2 className="text-xl font-semibold text-center">Mines</h2>
-            <div className="flex flex-col sm:flex-row items-center gap-3 text-sm">
+            
+            <div className="grid grid-cols-2 sm:flex sm:flex-row items-center gap-2 sm:gap-3 text-sm">
               <label className="text-slate-400">Bet</label>
-              <input type="number" value={bet} min={1} max={balance} onChange={e=>setBet(Math.max(1, Number(e.target.value||1)))} className="w-24 bg-slate-800 rounded-lg px-2 py-1 outline-none"/>
+              <input 
+                type="number" 
+                inputMode="decimal"
+                value={bet} 
+                min={1} 
+                max={balance} 
+                onChange={e=>setBet(Math.max(1, Number(e.target.value||1)))} 
+                className="w-full sm:w-24 bg-slate-800 rounded-lg px-2 py-2 outline-none mobile-touch-target"
+              />
               <label className="ml-0 sm:ml-4 text-slate-400">Mines</label>
-              <input type="range" min={1} max={10} value={mines} onChange={e=>setMines(Number(e.target.value))}/>
-              <span className="tabular-nums">{mines}</span>
-              <div className="ml-auto flex items-center gap-2">
-                {state !== 'active' ? (
-                  <button onClick={start} className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-medium">Start</button>
-                ) : (
-                  <button onClick={cashout} className="px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-sm font-medium">Cashout ×{multiplier.toFixed(2)}</button>
-                )}
+              <div className="flex items-center gap-2">
+                <input 
+                  type="range" 
+                  min={1} 
+                  max={10} 
+                  value={mines} 
+                  onChange={e=>setMines(Number(e.target.value))}
+                  className="w-full sm:w-auto"
+                />
+                <span className="tabular-nums min-w-[1.5rem] text-center">{mines}</span>
               </div>
             </div>
+            
+            <div className="flex justify-center">
+              {state !== 'active' ? (
+                <button 
+                  onClick={start} 
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-sm font-medium mobile-touch-target"
+                >
+                  Start
+                </button>
+              ) : (
+                <button 
+                  onClick={cashout} 
+                  className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-sm font-medium mobile-touch-target"
+                >
+                  Cashout ×{multiplier.toFixed(2)}
+                </button>
+              )}
+            </div>
+            
             <div className="grid grid-cols-5 gap-2 pt-2">
               {Array.from({length: size*size}).map((_,i)=>{
                 const isOpen = opened.includes(i) || revealAll;
@@ -1090,7 +1851,7 @@
                     key={i} 
                     onClick={()=>reveal(i)} 
                     disabled={!isClickable}
-                    className={`mine-tile aspect-square rounded-xl flex items-center justify-center text-xl font-bold shadow-inner transition ${
+                    className={`mine-tile aspect-square rounded-xl flex items-center justify-center text-xl font-bold shadow-inner transition mobile-touch-target ${
                       showBomb 
                         ? 'bg-rose-700' 
                         : showDiamond 
@@ -1105,9 +1866,10 @@
                 );
               })}
             </div>
+            
             <div className="text-sm text-slate-400 text-center">
-              {state==='idle' && <p>Choose bet & number of mines, then press Start. Click tiles to reveal. Cash out any time.</p>}
-              {state==='active' && <p>Revealed safe tiles: <span className="tabular-nums">{opened.length}</span> • Current multiplier: <span className="tabular-nums">×{multiplier.toFixed(2)}</span></p>}
+              {state==='idle' && <p>Choose bet & mines, then press Start. Click tiles to reveal.</p>}
+              {state==='active' && <p>Safe tiles: <span className="tabular-nums">{opened.length}</span> • Multiplier: <span className="tabular-nums">×{multiplier.toFixed(2)}</span></p>}
               {state==='busted' && <p className="text-rose-300">Boom! You hit a mine. Bet lost.</p>}
               {state==='cashed' && <p className="text-emerald-300">Cashed out! Winnings paid.</p>}
             </div>
@@ -1116,21 +1878,21 @@
           
           {/* Game End Popup */}
           {showGameEndPopup && gameResult && (
-            <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/30 backdrop-blur-sm animate-fade-in">
-              <div className={`flex flex-col items-center justify-center rounded-2xl shadow-2xl px-8 py-10 animate-bounce-in border-4 ${
+            <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm animate-fade-in">
+              <div className={`flex flex-col items-center justify-center rounded-2xl shadow-2xl px-4 sm:px-8 py-6 sm:py-10 animate-bounce-in border-4 w-full max-w-xs sm:max-w-sm ${
                 gameResult.type === 'win' 
                   ? 'bg-slate-900/85 border-emerald-400' 
                   : 'bg-slate-900/85 border-rose-400'
-              }`} style={{minWidth:'300px',maxWidth:'90vw', backdropFilter:'blur(6px)'}}>
+              }`} style={{backdropFilter:'blur(6px)'}}>
                 <div className={`text-4xl mb-4`}>
                   {gameResult.type === 'win' ? '🎉' : '💥'}
                 </div>
-                <div className={`text-xl font-bold mb-2 ${
+                <div className={`text-lg sm:text-xl font-bold mb-2 text-center ${
                   gameResult.type === 'win' ? 'text-emerald-400' : 'text-rose-400'
                 }`}>
                   {gameResult.message}
                 </div>
-                <div className={`text-2xl font-bold mb-2 ${
+                <div className={`text-xl sm:text-2xl font-bold mb-2 ${
                   gameResult.type === 'win' ? 'text-emerald-300' : 'text-rose-300'
                 }`}>
                   {gameResult.type === 'win' 
@@ -1139,7 +1901,7 @@
                   }
                 </div>
                 {gameResult.type === 'win' && (
-                  <div className="text-sm text-slate-300 mb-4">
+                  <div className="text-sm text-slate-300 mb-4 text-center">
                     Multiplier: {gameResult.multiplier.toFixed(2)}× | Total: €{gameResult.totalWin.toLocaleString()}
                   </div>
                 )}
@@ -1148,7 +1910,7 @@
                 </div>
                 <button 
                   onClick={closeGameEndPopup}
-                  className={`px-6 py-2 rounded-xl font-medium transition ${
+                  className={`px-6 py-3 rounded-xl font-medium transition w-full sm:w-auto mobile-touch-target ${
                     gameResult.type === 'win'
                       ? 'bg-emerald-600 hover:bg-emerald-500'
                       : 'bg-slate-700 hover:bg-slate-600'
@@ -1394,7 +2156,7 @@
       const drop = async () => {
         if (bet <= 0 || isDropping) return;
 
-        // Always use latest balance prop
+        // Auto mode: ensure enough balance for all balls
         if (isAuto) {
           const totalCost = bet * numBalls;
           if (totalCost > balance) return;
@@ -1409,7 +2171,7 @@
         if (isAuto) {
           const totalCost = bet * numBalls;
           // Deduct total cost up front
-          setBalance(b => b - totalCost); // Use functional update for latest value
+          setBalance(b => b - totalCost);
 
           const sims = [];
           for (let i = 0; i < numBalls; i++) {
@@ -1448,7 +2210,7 @@
           }]);
 
           // Deduct bet
-          setBalance(b => b - bet); // Use functional update for latest value
+          setBalance(b => b - bet);
 
           await simulateBallDrop(ballId);
           setIsDropping(false);
@@ -1478,93 +2240,98 @@
       }, []);
 
       return (
-        <div className="flex gap-6 max-w-7xl mx-auto">
+        <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 max-w-7xl mx-auto">
           {/* Left Control Panel - Stake.com style */}
-          <div className="w-80 bg-slate-800/60 rounded-2xl p-6 h-fit">
+          <div className="w-full lg:w-80 bg-slate-800/60 rounded-2xl p-4 lg:p-6 h-fit">
             {/* Manual/Auto Tabs */}
-            <div className="flex mb-6">
+            <div className="flex mb-4 lg:mb-6">
               <button 
                 onClick={() => setIsAuto(false)}
-                className={`flex-1 py-2 px-4 rounded-l-lg font-medium transition ${!isAuto ? 'bg-slate-700 text-white' : 'bg-slate-900 text-slate-400'}`}
+                className={`flex-1 py-2 px-4 rounded-l-lg font-medium transition mobile-touch-target ${!isAuto ? 'bg-slate-700 text-white' : 'bg-slate-900 text-slate-400'}`}
               >
                 Manual
               </button>
               <button 
                 onClick={() => setIsAuto(true)}
-                className={`flex-1 py-2 px-4 rounded-r-lg font-medium transition ${isAuto ? 'bg-slate-700 text-white' : 'bg-slate-900 text-slate-400'}`}
+                className={`flex-1 py-2 px-4 rounded-r-lg font-medium transition mobile-touch-target ${isAuto ? 'bg-slate-700 text-white' : 'bg-slate-900 text-slate-400'}`}
               >
                 Auto
               </button>
             </div>
 
-            {/* Bet Amount */}
-            <div className="mb-4">
-              <div className="flex items-center gap-2 mb-2">
-                <label className="text-sm text-slate-300">Bet Amount</label>
-                <div className="ml-auto flex items-center gap-1">
-                  <span className="text-xs text-slate-500">€</span>
-                  <span className="text-xs text-slate-400">%</span>
-                  <span className="text-xs text-slate-400">2x</span>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-3">
+              {/* Bet Amount */}
+              <div className="mb-0 sm:mb-0 lg:mb-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <label className="text-sm text-slate-300">Bet Amount</label>
+                  <div className="ml-auto flex items-center gap-1">
+                    <span className="text-xs text-slate-500">€</span>
+                    <span className="text-xs text-slate-400">%</span>
+                    <span className="text-xs text-slate-400">2x</span>
+                  </div>
+                </div>
+                <div className="relative">
+                  <input 
+                    type="number"
+                    inputMode="decimal"
+                    value={bet} 
+                    onChange={e => setBet(Math.max(0, Number(e.target.value) || 0))}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-3 text-white focus:outline-none focus:border-blue-500 mobile-touch-target"
+                    step="0.01"
+                  />
                 </div>
               </div>
-              <div className="relative">
-                <input 
-                  type="number" 
-                  value={bet} 
-                  onChange={e => setBet(Math.max(0, Number(e.target.value) || 0))}
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-                  step="0.01"
-                />
+
+              {/* Risk Level */}
+              <div className="mb-0 sm:mb-0 lg:mb-4">
+                <label className="block text-sm text-slate-300 mb-2">Risk</label>
+                <select 
+                  value={risk} 
+                  onChange={e => setRisk(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-3 text-white focus:outline-none focus:border-blue-500 mobile-touch-target"
+                >
+                  <option value="Low">Low</option>
+                  <option value="Medium">Medium</option>
+                  <option value="High">High</option>
+                </select>
               </div>
-            </div>
 
-            {/* Risk Level */}
-            <div className="mb-4">
-              <label className="block text-sm text-slate-300 mb-2">Risk</label>
-              <select 
-                value={risk} 
-                onChange={e => setRisk(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-              >
-                <option value="Low">Low</option>
-                <option value="Medium">Medium</option>
-                <option value="High">High</option>
-              </select>
-            </div>
+              {/* Rows */}
+              <div className="mb-0 sm:mb-0 lg:mb-4">
+                <label className="block text-sm text-slate-300 mb-2">Rows</label>
+                <select 
+                  value={rows_setting} 
+                  onChange={e => setRowsSetting(Number(e.target.value))}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-3 text-white focus:outline-none focus:border-blue-500 mobile-touch-target"
+                >
+                  <option value={8}>8</option>
+                  <option value={12}>12</option>
+                  <option value={16}>16</option>
+                </select>
+              </div>
 
-            {/* Rows */}
-            <div className="mb-6">
-              <label className="block text-sm text-slate-300 mb-2">Rows</label>
-              <select 
-                value={rows_setting} 
-                onChange={e => setRowsSetting(Number(e.target.value))}
-                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-              >
-                <option value={8}>8</option>
-                <option value={12}>12</option>
-                <option value={16}>16</option>
-              </select>
-            </div>
-
-            {isAuto && (
-              <div className="mb-6">
+              {/* Number of Balls (Auto mode) */}
+              {isAuto && (
+                <div className="mb-0 sm:mb-0 lg:mb-4">
                   <label className="block text-sm text-slate-300 mb-2">Number of Balls</label>
                   <input 
-                    type="number" 
+                    type="number"
+                    inputMode="numeric" 
                     value={numBalls} 
                     onChange={e => setNumBalls(Math.max(1, Number(e.target.value) || 1))}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-3 text-white focus:outline-none focus:border-blue-500 mobile-touch-target"
                     min="1"
                     max="200"
                   />
                 </div>
-            )}
+              )}
+            </div>
 
             {/* Bet Button */}
             <button 
               onClick={drop}
               disabled={isDropping || bet <= 0 || bet > balance}
-              className="w-full bg-green-600 hover:bg-green-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-lg transition"
+              className="w-full bg-green-600 hover:bg-green-700 disabled:bg-slate-600 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-lg transition mt-4 mobile-touch-target"
             >
               {isDropping ? 'Dropping...' : (isAuto ? `Drop ${numBalls} Balls` : 'Bet')}
             </button>
@@ -1581,16 +2348,18 @@
           </div>
 
           {/* Main Game Area */}
-          <div className="flex-1">
-            <PlinkoBoard 
-              ref={boardRef}
-              rows={rows_setting} 
-              activePath={lastPath} 
-              finalSlot={result?.slot ?? null} 
-              multipliers={multipliers}
-              balls={balls}
-              getSlotColor={getSlotColor}
-            />
+          <div className="flex-1 overflow-x-auto">
+            <div className="min-w-[350px]">
+              <PlinkoBoard 
+                ref={boardRef}
+                rows={rows_setting} 
+                activePath={lastPath} 
+                finalSlot={result?.slot ?? null} 
+                multipliers={multipliers}
+                balls={balls}
+                getSlotColor={getSlotColor}
+              />
+            </div>
           </div>
         </div>
       );
@@ -1664,19 +2433,23 @@
       };
 
       return (
-        <div className="relative bg-slate-900 rounded-2xl p-6 border border-slate-700">
+        <div className="relative bg-slate-900 rounded-2xl p-4 sm:p-6 border border-slate-700">
           <div className="text-center mb-4">
             <div className="text-slate-400 text-sm">Drop Zone</div>
             <div className="text-white text-lg font-semibold">Plinko Board</div>
           </div>
 
-          <div className="relative bg-slate-800 rounded-xl p-4 mx-auto" style={{ width: boardWidth + 40, height: boardHeight + 40 }}>
+          <div className="relative bg-slate-800 rounded-xl p-2 sm:p-4 mx-auto overflow-hidden" style={{ 
+            width: '100%',
+            maxWidth: boardWidth + 40,
+            height: 'auto',
+            aspectRatio: `${(boardWidth + 40) / (boardHeight + 40)}` 
+          }}>
             {/* SVG Game Board */}
             <svg 
               ref={svgRef}
-              width={boardWidth} 
-              height={boardHeight}
-              className="relative z-10"
+              viewBox={`0 0 ${boardWidth} ${boardHeight}`}
+              className="relative z-10 w-full h-full"
               style={{ filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.3))' }}
             >
               {/* Background */}
