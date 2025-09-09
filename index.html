@@ -14,8 +14,21 @@
   <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
   <!-- Apple touch icon -->
   <link rel="apple-touch-icon" href="assets/image.ico" />
+  <!-- PWA manifest and iOS meta tags -->
+  <link rel="manifest" href="assets/manifest.json" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Gambl" />
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    // Register service worker for PWA/offline support
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function() {
+        navigator.serviceWorker.register('assets/service-worker.js');
+      });
+    }
+  </script>
   <style>
     body { background-color: #0f172a; }
     .tabular-nums { font-variant-numeric: tabular-nums; }
