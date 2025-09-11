@@ -12,550 +12,312 @@
   <link rel="shortcut icon" href="assets/logo.ico" />
   <link rel="icon" type="image/png" sizes="192x192" href="assets/logo.png" />
   <link rel="apple-touch-icon" href="assets/logo.png" />
-  <!-- PWA manifest and iOS meta tags -->
-  <link rel="manifest" href="assets/manifest.json" />
+  <!-- PWA manifest and iOS meta tags (only inject manifest when served over http/localhost) -->
+  <script>
+    (function(){
+      try{
+        const ok = (location.protocol === 'https:' || location.protocol === 'http:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+        if (ok) {
+          const l = document.createElement('link');
+          l.rel = 'manifest';
+          l.href = 'assets/manifest.json';
+          document.head.appendChild(l);
+        } else {
+          console.info('Manifest not injected: running from file:// — use a local HTTP server to enable PWA features.');
+        }
+      }catch(e){console.warn('Manifest injection error', e);}    
+    })();
+  </script>
+  <script type="text/babel">
+  // Global confetti utility (simple canvas particles)
+  window.spawnConfetti = function(opts={}){
+    const { duration=1500, count=120 } = opts;
+    const canvas = document.createElement('canvas');
+    canvas.style.position='fixed'; canvas.style.inset='0'; canvas.style.pointerEvents='none'; canvas.style.zIndex=9999;
+    document.body.appendChild(canvas);
+    const ctx = canvas.getContext('2d');
+    function resize(){ canvas.width=window.innerWidth; canvas.height=window.innerHeight; }
+    resize();
+    const colors=['#34d399','#60a5fa','#f472b6','#fbbf24','#a78bfa','#fb7185'];
+    const parts=Array.from({length:count},()=>({
+      x:Math.random()*canvas.width,
+      y:Math.random()*canvas.height*0.3,
+      r:4+Math.random()*6,
+      c:colors[Math.floor(Math.random()*colors.length)],
+      vy:2+Math.random()*4,
+      vx:-2+Math.random()*4,
+      vr:(Math.random()*0.2)-0.1
+    }));
+    const start=performance.now();
+    (function loop(){
+      const t=performance.now()-start;
+      ctx.clearRect(0,0,canvas.width,canvas.height);
+      parts.forEach(p=>{ p.x+=p.vx; p.y+=p.vy; p.r+=p.vr; if(p.r<2)p.r=2; ctx.beginPath(); ctx.fillStyle=p.c; ctx.globalAlpha=1-(t/duration); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fill(); });
+      if(t<duration){ requestAnimationFrame(loop);} else { document.body.removeChild(canvas);} 
+    })();
+    window.addEventListener('resize', resize,{once:true});
+  };
+
+  // Global result popup utility
+  window.showResultPopup = function({title,message,color='emerald'}){
+    try {
+      const old = document.querySelector('.__gambl_result_popup');
+      if (old) old.remove();
+      const host = document.createElement('div');
+      host.className='__gambl_result_popup fixed inset-0 flex items-center justify-center pointer-events-none z-[10000]';
+      host.innerHTML = `\n        <div class="animate-fade-in-up bg-slate-900/90 backdrop-blur-md border-2 border-${color}-400/40 shadow-[0_0_25px_rgba(255,255,255,0.15)] rounded-2xl px-8 py-6 max-w-sm w-full text-center font-sans text-slate-100 relative">\n          <div class=\"text-2xl font-extrabold mb-2 bg-gradient-to-r from-${color}-400 to-${color}-600 bg-clip-text text-transparent drop-shadow\">${title}</div>\n          <div class=\"text-sm text-slate-300 leading-relaxed\">${message}</div>\n        </div>`;
+      document.body.appendChild(host);
+      setTimeout(()=>{ host.style.transition='opacity .5s'; host.style.opacity='0'; setTimeout(()=>host.remove(),600); }, 2600);
+    } catch(e) { console.warn('Popup error', e); }
+  };
+
+  /* CrashGame wrapper: mount the original working crash module 1:1 inside a container */
+  function CrashGame({ balance, setBalance }) {
+    const mountRef = React.useRef(null);
+    const instanceRef = React.useRef(null);
+  const hostRef = React.useRef(null);
+
+    React.useEffect(()=>{
+      const mount = mountRef.current;
+      if(!mount) return;
+
+      const opts = {
+        getBalance: ()=> balance,
+        setBalance: (v)=> setBalance(typeof v === 'function' ? v(balance) : v),
+        startBalance: balance
+      };
+
+      // prefer global initializer if present
+      let loadedScript = null;
+      let hostEl = null;
+      const postInit = ()=>{
+        try{
+          hostEl = mount.firstChild;
+          hostRef.current = hostEl;
+          const shadow = hostEl && (hostEl.shadowRoot || hostEl);
+          // sync displayed balance into React state
+              const syncBalance = ()=>{
+                try{
+                  const bEl = shadow && shadow.querySelector && shadow.querySelector('#balance');
+                  if(bEl){ const txt = bEl.textContent.replace(/[^0-9\.,\-]/g,'').replace(/,/g,''); const v = parseFloat(txt); if(!Number.isNaN(v)) setBalance(v); }
+                }catch(e){/* ignore */}
+              };
+          // listen to game events and sync balance when rounds start/end/cashout
+          ['roundStart','cashout','roundEnd','crash'].forEach(evt=>{
+            try{ hostEl.addEventListener(evt, syncBalance); }catch(e){}
+          });
+          // initial sync
+          syncBalance();
+
+          // enlarge internal UI: adjust the '.wrap' container inside shadow DOM to use more width
+          try{
+            const wrap = shadow && shadow.querySelector && shadow.querySelector('.wrap');
+            if(wrap){
+              wrap.style.maxWidth = '100%';
+              wrap.style.width = '100%';
+              wrap.style.padding = '20px';
+              // increase multiplier font size if present
+              const mult = shadow.querySelector && shadow.querySelector('.mult');
+              if(mult) mult.style.fontSize = '44px';
+            }
+          }catch(e){}
+        }catch(e){ console.warn('postInit sync failed', e); }
+      };
+
+      if(window.__initCrash){
+        try{ instanceRef.current = window.__initCrash(mount, opts); postInit(); }
+        catch(e){ console.warn('initCrash error', e); }
+      } else {
+        // If global initializer not present, load legacy script dynamically (works from file:// and normal hosting)
+        try{
+          const script = document.createElement('script');
+          // try legacy first which exposes window.__initCrash
+          script.src = 'crash-game.legacy.js';
+          script.async = true;
+          script.onload = ()=>{
+            try{ if(window.__initCrash) { instanceRef.current = window.__initCrash(mount, opts); postInit(); } }
+            catch(e){ console.warn('initCrash after load failed', e); }
+          };
+          script.onerror = (e)=>{ console.warn('failed to load crash-game.legacy.js', e); };
+          document.body.appendChild(script);
+        }catch(e){ console.warn('dynamic script injection failed', e); }
+      }
+
+      return ()=>{
+        try{
+          if(hostEl){ ['roundStart','cashout','roundEnd','crash'].forEach(evt=>{ try{ hostEl.removeEventListener(evt); }catch(e){} }); }
+        }catch(e){}
+        try{ if(instanceRef.current && typeof instanceRef.current.destroy === 'function') instanceRef.current.destroy(); }
+        catch(e){/* ignore */}
+      };
+    }, [mountRef, /* reinit if balance setter changes reference */ setBalance]);
+
+    // when React balance changes, update module's displayed balance if mounted
+    React.useEffect(()=>{
+      try{
+        const host = hostRef.current;
+        const shadow = host && (host.shadowRoot || host);
+        const bEl = shadow && shadow.querySelector && shadow.querySelector('#balance');
+        if(bEl){ bEl.textContent = Number(balance||0).toFixed(2); }
+      }catch(e){}
+    }, [balance]);
+
+    return (
+      <div className="w-full max-w-6xl mx-auto">
+        <div ref={mountRef} />
+      </div>
+    );
+  }
+
+  function BalloonGame({ balance, setBalance }) {
+    const [bet,setBet]=React.useState(5);
+    const [phase,setPhase]=React.useState('idle'); // idle|pumping|popped|cashed
+    const [mult,setMult]=React.useState(1);
+    // skewed random: small chance for huge max, common small to medium max
+    const [limit,setLimit]=React.useState(()=> {
+      const r=Math.random();
+      if(r<0.05) return +(1.2 + Math.random()*200).toFixed(2); // rare gigantic balloon
+      if(r<0.4) return +(1.2 + Math.random()*6).toFixed(2); // common small
+      return +(1.2 + Math.random()*30).toFixed(2); // medium
+    });
+    const [pumps,setPumps]=React.useState(0);
+    const [cash,setCash]=React.useState(null);
+    function reset(){ setPhase('idle'); setMult(1); setLimit((()=>{ const r=Math.random(); if(r<0.05) return +(1.2 + Math.random()*200).toFixed(2); if(r<0.4) return +(1.2 + Math.random()*6).toFixed(2); return +(1.2 + Math.random()*30).toFixed(2);})()); setPumps(0); setCash(null); }
+    function start(){ if(bet<=0||bet>balance) return; setBalance(b=>b-bet); setPhase('pumping'); }
+  function pump(){
+    if(phase!=='pumping') return;
+    // larger, more variable pump increments; sometimes big jumps
+    const variance = Math.random();
+    let inc = 0.08 + Math.random()*0.25; // base larger increment
+    if(variance < 0.08) inc += Math.random()*1.5; // occasional big pump
+    const next = +(mult + inc).toFixed(2);
+    setMult(next); setPumps(p=>p+1);
+    // pop if exceeding limit or random micro-pop chance to keep tension
+    if(next>=limit || Math.random() < 0.01){
+      setPhase('popped');
+      try{ window.showResultPopup({title:'Balloon Popped', message:`Popped at ${Number(next).toFixed(2)}x. Lost €${Number(bet||0).toFixed(2)}`, color:'rose'}); }catch(e){}
+    }
+  }
+  function cashOut(){ if(phase!=='pumping') return; const payout= +(bet*mult).toFixed(2); setBalance(b=>b+payout); setCash({payout,mult}); setPhase('cashed'); if(mult>=10) try{ window.spawnConfetti(); }catch(e){}; try{ window.showResultPopup({title:'Balloon Cashout', message:`Cashed at ${Number(mult).toFixed(2)}x for €${Number(payout).toFixed(2)}`, color:'emerald'});}catch(e){} }
+    return (
+      <div className="w-full max-w-4xl mx-auto bg-gradient-to-br from-fuchsia-900 via-purple-900 to-slate-900 p-6 rounded-3xl border border-fuchsia-500/30 shadow-xl space-y-6">
+        <div className="flex flex-col sm:flex-row gap-6">
+          <div className="sm:w-64 space-y-4 bg-slate-900/60 p-4 rounded-xl border border-fuchsia-500/20">
+            <div className="text-xs text-slate-400 font-semibold">Bet</div>
+            <input type="number" min="1" value={bet} disabled={phase!=='idle'} onChange={e=>setBet(+e.target.value)} className="w-full bg-slate-800/70 border border-slate-600 rounded px-3 py-2 text-sm"/>
+            <div className="text-xs text-slate-400">Balance: <span className="text-emerald-400 font-semibold">€{balance.toFixed(2)}</span></div>
+            {phase==='idle' && <button onClick={start} className="w-full py-3 rounded-lg bg-gradient-to-r from-fuchsia-500 to-pink-600 text-white font-semibold">Start</button>}
+            {phase==='pumping' && <div className="flex gap-2"><button onClick={pump} className="flex-1 py-3 rounded-lg bg-gradient-to-r from-amber-500 to-orange-600 text-white font-semibold">Pump</button><button onClick={cashOut} className="flex-1 py-3 rounded-lg bg-gradient-to-r from-emerald-500 to-green-600 text-white font-semibold">Cash {mult.toFixed(2)}x</button></div>}
+            {(phase==='popped'||phase==='cashed') && <button onClick={reset} className="w-full py-3 rounded-lg bg-gradient-to-r from-fuchsia-500 to-pink-600 text-white font-semibold">New Round</button>}
+          </div>
+          <div className="flex-1 relative flex items-center justify-center">
+            <div className="relative w-64 h-64 sm:w-80 sm:h-80">
+              <div className={`absolute inset-0 flex items-center justify-center text-white font-bold text-3xl ${phase==='popped'?'text-rose-500':''}`}>{mult.toFixed(2)}x</div>
+              <div style={{transform:`scale(${Math.min(1.4,0.6 + mult/limit)})`}} className={`transition-transform duration-300 absolute inset-0 rounded-full bg-gradient-to-br from-pink-500 to-rose-600 shadow-2xl ${phase==='popped'?'opacity-30 grayscale':''}`}></div>
+              {phase==='cashed' && <div className="absolute inset-0 flex flex-col items-center justify-center"><div className="px-4 py-2 rounded bg-emerald-600/80 border border-emerald-400 text-white text-sm">Cashed {cash.mult.toFixed(2)}x<br/>€{cash.payout.toFixed(2)}</div></div>}
+              {phase==='popped' && <div className="absolute inset-0 flex items-center justify-center text-5xl font-black text-rose-600">POP!</div>}
+            </div>
+          </div>
+        </div>
+        {phase==='pumped' && <div/>}
+      </div>
+    );
+  }
+
+  function DiceGame({ balance, setBalance }) {
+    const houseEdge=0.01;
+    const [bet,setBet]=React.useState(5);
+    const [rollUnder,setRollUnder]=React.useState(50);
+    const [rolling,setRolling]=React.useState(false);
+    const [last,setLast]=React.useState(null);
+    const winChance = rollUnder; // %
+    const multiplier = +((100 - houseEdge*100)/(winChance)).toFixed(2);
+  function roll(){ if(rolling||bet<=0||bet>balance) return; setBalance(b=>b-bet); setRolling(true); const r=Math.random()*100; setTimeout(()=>{ const win = r<rollUnder; if(win){ const payout=+(bet*multiplier).toFixed(2); setBalance(b=>b+payout); if(multiplier>=5) window.spawnConfetti(); window.showResultPopup({title:'Dice Win', message:`Rolled ${r.toFixed(2)} (< ${rollUnder}) for €${payout.toFixed(2)}`, color:'emerald'}); setLast({r,win,payout}); } else { window.showResultPopup({title:'Dice Lose', message:`Rolled ${r.toFixed(2)} (need < ${rollUnder}) Lost €${bet.toFixed(2)}`, color:'rose'}); setLast({r,win:false,payout:0}); } setRolling(false); },600); }
+    return (
+      <div className="w-full max-w-4xl mx-auto bg-gradient-to-br from-slate-900 via-slate-900 to-slate-800 p-6 rounded-2xl border border-indigo-500/20 shadow space-y-6">
+        <div className="flex flex-col sm:flex-row gap-6">
+          <div className="sm:w-72 space-y-4 bg-slate-800/60 p-4 rounded-xl border border-slate-700">
+            <div className="text-xs text-slate-400 font-semibold">Bet Amount</div>
+            <input type="number" min="1" value={bet} onChange={e=>setBet(+e.target.value)} disabled={rolling} className="w-full bg-slate-900/70 border border-slate-600 rounded px-3 py-2 text-sm"/>
+            <div className="text-xs text-slate-400">Roll Under</div>
+            <input type="range" min="2" max="98" value={rollUnder} onChange={e=>setRollUnder(+e.target.value)} disabled={rolling} className="w-full"/>
+            <div className="flex justify-between text-xs text-slate-300"><span>Chance</span><span>{winChance.toFixed(2)}%</span></div>
+            <div className="flex justify-between text-xs text-slate-300"><span>Multiplier</span><span>{multiplier.toFixed(2)}x</span></div>
+            <div className="flex justify-between text-xs text-slate-300"><span>Potential</span><span>€{(bet*multiplier).toFixed(2)}</span></div>
+            <button onClick={roll} className="w-full py-3 rounded-lg bg-gradient-to-r from-indigo-500 to-blue-600 text-white font-semibold disabled:opacity-50" disabled={rolling||bet<=0||bet>balance}>{rolling? 'Rolling...' : 'Roll'}</button>
+            {last && <div className={`text-sm font-semibold text-center ${last.win?'text-emerald-400':'text-rose-400'}`}>{last.win?`WIN +€${last.payout.toFixed(2)}`:`LOST (Roll ${last.r.toFixed(2)})`}</div>}
+          </div>
+          <div className="flex-1 relative">
+            <div className="h-60 bg-slate-900/70 border border-slate-700 rounded-xl flex items-center justify-center relative overflow-hidden">
+              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-indigo-500 via-fuchsia-500 to-pink-500 animate-pulse"/>
+              <div className="text-5xl font-black tracking-tight text-cyan-300">{rolling? '…' : (last? last.r.toFixed(2):'—')}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  </script>
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Gambl" />
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React + ReactDOM + Babel (for in-browser JSX) -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script>
     // Register service worker for PWA/offline support
+    // Only register on secure contexts (https) or localhost — avoid errors when opened via file://
     if ('serviceWorker' in navigator) {
-      window.addEventListener('load', function() {
-        navigator.serviceWorker.register('assets/service-worker.js');
-      });
+      const canRegisterSW = (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1');
+      if (canRegisterSW) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('assets/service-worker.js').catch(err => {
+            console.warn('ServiceWorker registration failed:', err);
+          });
+        });
+      } else {
+        // Avoid noisy console errors when file is opened directly (origin 'null')
+        console.info('Skipping ServiceWorker registration: insecure origin. Serve the site over http(s) or localhost to enable PWA features.');
+      }
     }
   </script>
-  <style>
-    body { background-color: #0f172a; }
-    .tabular-nums { font-variant-numeric: tabular-nums; }
-    
-    /* Custom animations for mines tiles */
-    .mine-tile {
-      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-      transform-origin: center;
-    }
-    
-    .mine-tile:hover {
-      transform: scale(1.05);
-      background-color: #475569 !important;
-    }
-    
-    /* Touch devices - apply hover effect on active */
-    @media (hover: none) {
-      .mine-tile:active {
-        transform: scale(1.05);
-        background-color: #475569 !important;
-      }
-    }
-    
-    .mine-tile.revealing {
-      animation: revealTile 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-    }
-    
-    @keyframes revealTile {
-      0% {
-        transform: scale(1.05) rotateY(0deg);
-        opacity: 1;
-      }
-      50% {
-        transform: scale(1.1) rotateY(90deg);
-        opacity: 0.7;
-      }
-      100% {
-        transform: scale(1) rotateY(0deg);
-        opacity: 1;
-      }
-    }
-    
-    @keyframes fadeIn {
-      from { opacity: 0; transform: scale(0.9); }
-      to { opacity: 1; transform: scale(1); }
-    }
-    
-    @keyframes bounceIn {
-      0% { opacity: 0; transform: scale(0.3); }
-      50% { opacity: 1; transform: scale(1.05); }
-      70% { transform: scale(0.9); }
-      100% { opacity: 1; transform: scale(1); }
-    }
-    
-    @keyframes ping {
-      0% { transform: scale(0.8); opacity: 0.8; }
-      50% { opacity: 0.6; }
-      100% { transform: scale(1.8); opacity: 0; }
-    }
-    
-    .animate-fade-in { animation: fadeIn 0.3s ease-out; }
-    .animate-bounce-in { animation: bounceIn 0.6s ease-out; }
-    
-    /* Mobile optimization styles */
-    @media (max-width: 640px) {
-      input[type="number"],
-      input[type="text"],
-      input[type="password"],
-      select {
-        font-size: 16px; /* Prevents iOS zoom on input focus */
-      }
-      
-      .mobile-full {
-        width: 100%;
-      }
-      
-      .mobile-p-2 {
-        padding: 0.5rem;
-      }
-      
-      /* Improve touch targets */
-      .mobile-touch-target {
-        min-height: 44px;
-        min-width: 44px;
-      }
-    }
-    
-    /* Hide scrollbars but keep functionality */
-    .no-scrollbar {
-      -ms-overflow-style: none;  /* IE and Edge */
-      scrollbar-width: none;     /* Firefox */
-    }
-    
-    .no-scrollbar::-webkit-scrollbar {
-      display: none;  /* Chrome, Safari, Opera */
-    }
-    
-    /* Fix for iOS 100vh issue */
-    @supports (-webkit-touch-callout: none) {
-      .min-h-screen {
-        min-height: -webkit-fill-available;
-      }
-    }
-  </style>
-</head>
-<body class="bg-slate-950">
-  <div id="root"></div>
-  <!-- React, ReactDOM, Babel CDN -->
-  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script type="module">
-    // Inlined crash module (adapted from crash-game.js)
-    // Exposes window.__initCrash(container, opts)
-    (function(){
-      function initCrashGame(container, opts = {}){
-        if (!container) throw new Error('container required');
-        const clientSeed = String(opts.clientSeed || (Math.random()+''));
-        const host = document.createElement('div');
-        const shadow = host.attachShadow ? host.attachShadow({ mode: 'open' }) : host;
-        container.appendChild(host);
-        function xmur3(str){
-          let h = 1779033703 ^ str.length;
-          for(let i=0;i<str.length;i++){ h = Math.imul(h ^ str.charCodeAt(i), 3432918353); h = (h<<13)|(h>>>19); }
-          return function(){ h = Math.imul(h ^ (h>>>16), 2246822507); h = Math.imul(h ^ (h>>>13), 3266489909); return (h ^= h>>>16) >>> 0; };
-        }
-        function mulberry32(a){ return function(){ a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
-        const seedFn = xmur3(clientSeed);
-        let rng = mulberry32(seedFn());
-        let raf = null; let running = false; let paused = false; let multiplier = 1; let crashPoint = 1; let startTs = 0; let last20 = []; let bet = Number(opts.startBet || 10); let autoCash = Number(opts.autoCash || 0); let gameState = 'waiting'; let userCashedOut = false; let userCashMultiplier = 0;
-        const style = document.createElement('style');
-        style.textContent = `
-        :host{all:initial}
-        .crash{font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;color:#ffffff;background:#0f1419;min-height:600px}
-        .wrap{width:100%;max-width:1200px;background:linear-gradient(135deg,#1a1f2e 0%,#16213e 100%);border-radius:16px;padding:24px;box-shadow:0 20px 60px rgba(0,0,0,0.4);display:flex;flex-direction:column;gap:20px;border:1px solid rgba(59,130,246,0.1)}
-        .game-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
-        .game-title{font-size:24px;font-weight:700;color:#60a5fa;text-shadow:0 0 20px rgba(96,165,250,0.3)}
-        .controls{display:flex;gap:12px;flex-wrap:wrap;align-items:center;background:rgba(15,23,42,0.6);padding:16px;border-radius:12px;border:1px solid rgba(100,116,139,0.1)}
-        input[type=number]{background:rgba(30,41,59,0.8);border:1px solid rgba(100,116,139,0.2);color:#f1f5f9;padding:12px 16px;border-radius:8px;min-width:120px;font-size:14px;font-weight:500}
-        input[type=number]:focus{outline:none;border-color:#3b82f6;box-shadow:0 0 0 3px rgba(59,130,246,0.1)}
-        .btn{background:linear-gradient(135deg,#3b82f6 0%,#1d4ed8 100%);border:none;padding:12px 24px;border-radius:8px;color:white;font-weight:600;cursor:pointer;transition:all 0.2s;font-size:14px;min-width:100px}
-        .btn:hover{transform:translateY(-2px);box-shadow:0 8px 25px rgba(59,130,246,0.3)}
-        .btn:active{transform:translateY(0)}
-        .btn.cashout{background:linear-gradient(135deg,#10b981 0%,#059669 100%)}
-        .btn.cashout:hover{box-shadow:0 8px 25px rgba(16,185,129,0.3)}
-        .btn:disabled{background:#374151;cursor:not-allowed;transform:none;box-shadow:none}
-        .game-area{flex:1;min-height:400px;background:radial-gradient(ellipse at center,rgba(59,130,246,0.05) 0%,transparent 70%);border-radius:12px;position:relative;overflow:hidden;border:1px solid rgba(100,116,139,0.1)}
-        .multiplier-display{position:absolute;top:30px;left:50%;transform:translateX(-50%);font-size:72px;font-weight:900;color:#60a5fa;text-shadow:0 0 30px rgba(96,165,250,0.5);z-index:10;font-variant-numeric:tabular-nums}
-        .rocket-container{position:absolute;bottom:50px;left:50%;transform:translateX(-50%);transition:all 0.1s ease-out;z-index:5}
-        .rocket{font-size:48px;display:block;transform-origin:center bottom;filter:drop-shadow(0 0 10px rgba(96,165,250,0.4))}
-        .flames{position:absolute;bottom:-8px;left:50%;transform:translateX(-50%);width:30px;height:40px;opacity:0}
-        .flames.active{opacity:1;animation:flameFlicker 0.1s infinite alternate}
-        @keyframes flameFlicker{0%{transform:translateX(-50%) scaleY(0.8) scaleX(0.9)} 100%{transform:translateX(-50%) scaleY(1.2) scaleX(1.1)}}
-        .flame{position:absolute;border-radius:50% 50% 50% 50% / 60% 60% 40% 40%}
-        .flame.large{width:20px;height:25px;bottom:0;left:50%;transform:translateX(-50%);background:linear-gradient(to top,#ff6b35,#ffa500,#ffff00);animation:flame-large 0.15s ease-in-out infinite alternate}
-        .flame.small{width:12px;height:15px;bottom:8px;left:50%;transform:translateX(-50%);background:linear-gradient(to top,#ff4500,#ff6347,#ffa500);animation:flame-small 0.12s ease-in-out infinite alternate-reverse}
-        @keyframes flame-large{0%{transform:translateX(-50%) scaleY(0.8)} 100%{transform:translateX(-50%) scaleY(1.1)}}
-        @keyframes flame-small{0%{transform:translateX(-50%) scaleY(1.1)} 100%{transform:translateX(-50%) scaleY(0.9)}}
-        .trajectory{position:absolute;bottom:0;left:0;width:100%;height:100%;pointer-events:none}
-        .trajectory canvas{width:100%;height:100%}
-        .history{display:flex;gap:8px;flex-wrap:wrap;max-height:60px;overflow-y:auto}
-        .history-item{background:rgba(30,41,59,0.6);padding:6px 12px;border-radius:6px;font-size:12px;font-weight:500;border:1px solid rgba(100,116,139,0.1)}
-        .history-item.crashed{color:#ef4444}
-        .history-item.won{color:#10b981}
-        .game-status{text-align:center;padding:16px;font-size:16px;font-weight:600;border-radius:8px;margin:12px 0}
-        .game-status.waiting{background:rgba(100,116,139,0.1);color:#64748b}
-        .game-status.flying{background:rgba(59,130,246,0.1);color:#60a5fa}
-        .game-status.crashed{background:rgba(239,68,68,0.1);color:#ef4444}
-        .game-status.cashed-out{background:rgba(16,185,129,0.1);color:#10b981}
-        @media(max-width:768px){
-          .wrap{padding:16px;max-width:100%}
-          .multiplier-display{font-size:48px}
-          .rocket{font-size:36px}
-          .controls{flex-direction:column;gap:8px}
-          .btn{min-width:auto;width:100%}
-        }
-        `;
-        const root = document.createElement('div'); root.className = 'crash'; root.innerHTML = `
-  <div class="wrap">
-    <div class="game-header">
-      <h2 class="game-title">🚀 Crash</h2>
-      <div class="history" id="history"></div>
-    </div>
 
-    <div class="controls">
-      <div>
-        <label style="display:block;font-size:12px;color:#94a3b8;margin-bottom:4px">Bet Amount</label>
-        <input id="bet" type="number" min="1" value="${bet}" placeholder="Enter bet..." />
-      </div>
-      <div>
-        <label style="display:block;font-size:12px;color:#94a3b8;margin-bottom:4px">Auto Cash Out</label>
-        <input id="auto" type="number" step="0.01" min="0" placeholder="e.g. 2.50x" value="${autoCash || ''}" />
-      </div>
-      <button id="start" class="btn">Place Bet</button>
-      <button id="cash" class="btn cashout" disabled>Cash Out</button>
-    </div>
-
-    <div class="game-status waiting" id="gameStatus">Waiting for next round...</div>
-
-    <div class="game-area">
-      <div class="multiplier-display" id="multVal">1.00x</div>
-      
-      <div class="rocket-container" id="rocketContainer">
-        <div class="rocket" id="rocket">🚀</div>
-        <div class="flames" id="flames">
-          <div class="flame large"></div>
-          <div class="flame small"></div>
-        </div>
-      </div>
-
-      <div class="trajectory">
-        <canvas id="graph"></canvas>
-      </div>
-    </div>
-  </div>
-  `;
-        shadow.appendChild(style); shadow.appendChild(root);
-        const el = shadow.querySelector.bind(shadow);
-        const betEl = el('#bet'); const autoEl = el('#auto'); const startBtn = el('#start'); const cashBtn = el('#cash'); const multEl = el('#multVal'); const rocketContainer = el('#rocketContainer'); const rocket = el('#rocket'); const flames = el('#flames'); const canvas = el('#graph'); const ctx = canvas.getContext('2d'); const gameStatus = el('#gameStatus'); const historyEl = el('#history');
-        function recomputeCanvas(){ canvas.width = canvas.clientWidth * devicePixelRatio; canvas.height = canvas.clientHeight * devicePixelRatio; ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0); }
-        recomputeCanvas(); window.addEventListener('resize', recomputeCanvas);
-        let points = [];
-        function draw(){ 
-          const w = canvas.clientWidth; const h = canvas.clientHeight; 
-          ctx.clearRect(0,0,w,h); 
-          if (!points.length) return; 
-          ctx.beginPath(); 
-          ctx.lineWidth = 3; 
-          ctx.strokeStyle = gameState === 'crashed' ? '#ef4444' : '#60a5fa';
-          ctx.shadowColor = gameState === 'crashed' ? '#ef4444' : '#60a5fa';
-          ctx.shadowBlur = 10;
-          for(let i=0;i<points.length;i++){ 
-            const x = (i/(points.length-1))*w; 
-            const y = h - Math.min(h-20, ((points[i]-1)/Math.max(0.5, Math.max(...points)-1)) * (h-40)); 
-            if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); 
-          } 
-          ctx.stroke(); 
-          ctx.shadowBlur = 0;
-        }
-        function seededRand(){ return rng(); }
-        function generateCrash(){
-          const u = seededRand();
-          // Realistic crash distribution like Stake.com
-          if (u < 0.04) return 1.00; // 4% instant crash
-          if (u < 0.08) return 1.01 + seededRand() * 0.09; // 4% very low (1.01-1.10x)
-          if (u < 0.25) return 1.1 + seededRand() * 0.9; // 17% low (1.1-2.0x)
-          if (u < 0.60) return 2.0 + seededRand() * 3.0; // 35% medium (2-5x)
-          if (u < 0.85) return 5.0 + seededRand() * 10.0; // 25% high (5-15x)
-          if (u < 0.96) return 15.0 + seededRand() * 35.0; // 11% very high (15-50x)
-          // 4% extreme (50x+)
-          const extreme = 50 + Math.pow(seededRand(), 3) * 500;
-          return Math.max(1, Number(extreme.toFixed(2)));
-        }
-        function roundHashFor(nonce){ const s = clientSeed + '|' + nonce + '|' + Math.floor(seededRand()*1e9); let h = 2166136261 >>> 0; for(let i=0;i<s.length;i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619) >>> 0; return '0x' + ('00000000' + (h >>> 0).toString(16)).slice(-8); }
-        function emit(name, detail){
-          const ev = new CustomEvent(name, { detail });
-          try{
-            if (host && typeof host.dispatchEvent === 'function') return host.dispatchEvent(ev);
-            if (container && typeof container.dispatchEvent === 'function') return container.dispatchEvent(ev);
-            return document.dispatchEvent(ev);
-          }catch(e){ /* swallow dispatch errors */ }
-        }
-        
-        function updateGameStatus(status, message) {
-          gameStatus.className = `game-status ${status}`;
-          gameStatus.textContent = message;
-        }
-        
-        function animateRocket(progress) {
-          const maxHeight = 300;
-          const y = Math.min(maxHeight * progress, maxHeight);
-          const rotation = Math.min(progress * 15, 15);
-          rocketContainer.style.transform = `translateX(-50%) translateY(-${y}px) rotate(${rotation}deg)`;
-          
-          if (gameState === 'flying') {
-            flames.classList.add('active');
-            rocket.style.filter = 'drop-shadow(0 0 15px rgba(96,165,250,0.6))';
-          } else {
-            flames.classList.remove('active');
-            rocket.style.filter = 'drop-shadow(0 0 10px rgba(96,165,250,0.4))';
-          }
-        }
-        
-        function updateHistory(result) {
-          const item = document.createElement('div');
-          item.className = `history-item ${result === 0 ? 'crashed' : 'won'}`;
-          item.textContent = result === 0 ? 'CRASHED' : `${result.toFixed(2)}x`;
-          historyEl.insertBefore(item, historyEl.firstChild);
-          
-          // Keep only last 10 items
-          while (historyEl.children.length > 10) {
-            historyEl.removeChild(historyEl.lastChild);
-          }
-        }
-        let nonce = 0;
-        function newRound(){ 
-          multiplier = 1; points = [1]; draw(); startTs = performance.now(); crashPoint = Math.max(1, generateCrash()); 
-          gameState = 'flying';
-          userCashedOut = false;
-          userCashMultiplier = 0;
-          updateGameStatus('flying', '🚀 Rocket is flying! Cash out anytime...');
-          emit('roundStart', { nonce, crashPoint }); 
-        }
-        
-        function start(){ 
-          if (running) return;
-          bet = Math.max(1, Number(betEl.value) || bet); 
-          autoCash = Number(autoEl.value) || 0; 
-          
-          // Get current balance from parent app
-          const currentBalance = opts.getBalance ? opts.getBalance() : 1000;
-          if (bet > currentBalance) { 
-            alert('Insufficient balance'); 
-            return; 
-          }
-          
-          // Deduct bet from parent balance
-          if (opts.setBalance) opts.setBalance(currentBalance - bet);
-          
-          nonce++; 
-          newRound(); 
-          running = true; paused = false; startTs = performance.now(); 
-          startBtn.disabled = true;
-          startBtn.textContent = 'Betting...';
-          cashBtn.disabled = false;
-          loop(startTs); 
-        }
-        function loop(ts){ 
-          if (!running || paused) return; 
-          const dt = Math.max(0.01, Math.min(0.05, (performance.now() - (loop._last || startTs))/1000)); 
-          loop._last = performance.now(); 
-          
-          // More realistic growth curve
-          const timeElapsed = (performance.now() - startTs) / 1000;
-          multiplier = 1 + Math.pow(timeElapsed * 0.6, 1.8);
-          
-          if (multiplier > crashPoint) multiplier = crashPoint; 
-          points.push(Number(multiplier.toFixed(3))); 
-          if (points.length > 400) points.shift(); 
-          multEl.textContent = multiplier.toFixed(2) + 'x'; 
-          
-          // Animate rocket based on multiplier
-          const progress = Math.min(1, (multiplier - 1) / Math.max(1, crashPoint - 1));
-          animateRocket(progress);
-          draw(); 
-          
-          // Auto-cash
-          if (autoCash && multiplier >= autoCash && running && !userCashedOut){ 
-            doCashout(true); 
-            return; 
-          } 
-          
-          if (multiplier >= crashPoint){ 
-            running = false; 
-            gameState = 'crashed';
-            emit('crash', { nonce, crashPoint }); 
-            onCrash(); 
-            return; 
-          } 
-          
-          raf = requestAnimationFrame(loop); 
-        }
-        function doCashout(auto=false){ 
-          if (!running || userCashedOut) return; 
-          running = false; 
-          userCashedOut = true;
-          userCashMultiplier = multiplier;
-          gameState = 'cashed-out';
-          
-          const winMult = multiplier; 
-          const payout = Math.floor((bet * winMult) * 100) / 100; 
-          
-          // Add payout to parent balance
-          if (opts.setBalance && opts.getBalance) {
-            const currentBalance = opts.getBalance();
-            opts.setBalance(currentBalance + payout);
-          }
-          
-          last20.unshift(Number(winMult.toFixed(2))); 
-          if (last20.length>20) last20.pop(); 
-          updateHistory(winMult);
-          
-          emit('cashout', { nonce, winMult, payout, auto }); 
-          
-          // Show "Game in Progress" and continue to show crash
-          updateGameStatus('cashed-out', `💰 Cashed out at ${winMult.toFixed(2)}x! Watching crash...`);
-          startBtn.disabled = true;
-          startBtn.textContent = 'Game in Progress';
-          cashBtn.disabled = true;
-          
-          // Continue the round to show where it would crash
-          running = true;
-          loop(performance.now());
-        }
-        function onCrash(){ 
-          last20.unshift(0); 
-          if (last20.length>20) last20.pop(); 
-          updateHistory(0);
-          
-          if (userCashedOut) {
-            // User already cashed out, show final result
-            showGameResult(true, userCashMultiplier, bet * userCashMultiplier);
-          } else {
-            // User didn't cash out, they lost
-            showGameResult(false, crashPoint, 0);
-          }
-          
-          updateGameStatus('crashed', `💥 Crashed at ${crashPoint.toFixed(2)}x`);
-          emit('roundEnd',{ nonce, crashPoint }); 
-          
-          // Reset for next round
-          setTimeout(() => {
-            gameState = 'waiting';
-            updateGameStatus('waiting', 'Waiting for next round...');
-            startBtn.disabled = false;
-            startBtn.textContent = 'Place Bet';
-            cashBtn.disabled = true;
-            animateRocket(0); // Reset rocket position
-          }, 3000);
-        }
-        
-        function showGameResult(won, multiplier, payout) {
-          // Create popup similar to mines game
-          const popup = document.createElement('div');
-          popup.style.cssText = `
-            position: fixed; top: 0; left: 0; right: 0; bottom: 0; 
-            background: rgba(0,0,0,0.8); backdrop-filter: blur(8px);
-            display: flex; align-items: center; justify-content: center; z-index: 1000;
-          `;
-          
-          const content = document.createElement('div');
-          content.style.cssText = `
-            background: linear-gradient(135deg, #1e293b 0%, #334155 100%); 
-            border-radius: 16px; padding: 32px; text-align: center; 
-            border: 1px solid rgba(59,130,246,0.2); max-width: 400px; width: 90%;
-          `;
-          
-          if (won) {
-            content.innerHTML = `
-              <div style="font-size: 48px; margin-bottom: 16px;">🎉</div>
-              <h3 style="color: #10b981; font-size: 24px; margin-bottom: 8px;">Cash Out Successful!</h3>
-              <p style="color: #94a3b8; margin-bottom: 16px;">You cashed out at ${multiplier.toFixed(2)}x</p>
-              <div style="background: rgba(16,185,129,0.1); border: 1px solid rgba(16,185,129,0.2); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                <div style="color: #10b981; font-size: 18px; font-weight: 600;">+€${payout.toFixed(2)}</div>
-                <div style="color: #94a3b8; font-size: 14px;">Profit: €${(payout - bet).toFixed(2)}</div>
-              </div>
-              <div style="color: #64748b; font-size: 14px;">Rocket crashed at ${crashPoint.toFixed(2)}x</div>
-            `;
-          } else {
-            content.innerHTML = `
-              <div style="font-size: 48px; margin-bottom: 16px;">💥</div>
-              <h3 style="color: #ef4444; font-size: 24px; margin-bottom: 8px;">Rocket Crashed!</h3>
-              <p style="color: #94a3b8; margin-bottom: 16px;">Crashed at ${multiplier.toFixed(2)}x</p>
-              <div style="background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.2); border-radius: 8px; padding: 16px; margin-bottom: 16px;">
-                <div style="color: #ef4444; font-size: 18px; font-weight: 600;">-€${bet.toFixed(2)}</div>
-                <div style="color: #94a3b8; font-size: 14px;">Better luck next time!</div>
-              </div>
-            `;
-          }
-          
-          const closeBtn = document.createElement('button');
-          closeBtn.textContent = 'Continue';
-          closeBtn.style.cssText = `
-            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); 
-            border: none; padding: 12px 24px; border-radius: 8px; 
-            color: white; font-weight: 600; cursor: pointer; margin-top: 16px;
-          `;
-          closeBtn.onclick = () => document.body.removeChild(popup);
-          
-          content.appendChild(closeBtn);
-          popup.appendChild(content);
-          document.body.appendChild(popup);
-        }
-        startBtn.addEventListener('click', start); 
-        cashBtn.addEventListener('click', ()=>doCashout(false)); 
-        function onKey(e){ 
-          if (e.code === 'Space' && !cashBtn.disabled){ 
-            e.preventDefault(); 
-            doCashout(false); 
-          } else if (e.key === 'Enter' && !startBtn.disabled){ 
-            start(); 
-          } 
-        }
-        window.addEventListener('keydown', onKey);
-        function onVis(){ 
-          if (document.hidden){ 
-            paused = true; 
-            if (raf) cancelAnimationFrame(raf); 
-          } else { 
-            if (running){ 
-              paused = false; 
-              loop(performance.now()); 
-            } 
-          } 
-        }
-        document.addEventListener('visibilitychange', onVis);
-        draw();
-        function destroy(){ 
-          running = false; paused = true; 
-          if (raf) cancelAnimationFrame(raf); 
-          window.removeEventListener('keydown', onKey); 
-          document.removeEventListener('visibilitychange', onVis); 
-          try{ container.removeChild(host); }catch(e){} 
-        }
-        return { destroy };
-      }
-      window.__initCrash = initCrashGame; window.__crash_module_loaded = true;
-    })();
-  </script>
+  <!-- Crash game is loaded lazily by the App; a legacy fallback is available for file:// origins -->
   <script type="text/babel">
     // include all commonly used React hooks so inline JSX (Babel) can reference them by name
     const { useState, useMemo, useEffect, useRef, useCallback, useLayoutEffect, useImperativeHandle, useReducer, forwardRef } = React;
+
+    // Small helper to create an AudioContext safely and avoid repeated noisy errors
+    let _audioContextErrorLogged = false;
+    function createSafeAudioContext(){
+      try{
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if(!AudioContext) return null;
+        const ctx = new AudioContext();
+        // resume on first user gesture if suspended
+        if (ctx.state === 'suspended') {
+          const resume = () => { ctx.resume && ctx.resume(); window.removeEventListener('pointerdown', resume); };
+          window.addEventListener('pointerdown', resume, { once: true });
+        }
+        return ctx;
+      }catch(e){
+        if(!_audioContextErrorLogged){
+          console.warn('AudioContext not available or failed to initialize:', e);
+          _audioContextErrorLogged = true;
+        }
+        return null;
+      }
+    }
 
     // Enhanced BlackjackGame component with better card visuals, animations, and sounds
     function BlackjackGame({ balance, onUpdateBalance }) {
         // Use Web Audio API to synthesize short sounds (avoids unsupported base64 audio data issues)
         const audioCtxRef = useRef(null);
         useEffect(() => {
-          try {
-            const AudioContext = window.AudioContext || window.webkitAudioContext;
-            audioCtxRef.current = new AudioContext();
-            // Try to resume if suspended (some browsers require user gesture)
-            if (audioCtxRef.current.state === 'suspended') {
-              const resume = () => { audioCtxRef.current && audioCtxRef.current.resume(); window.removeEventListener('pointerdown', resume); };
-              window.addEventListener('pointerdown', resume, { once: true });
-            }
-          } catch (e) {
-            audioCtxRef.current = null;
-          }
+          audioCtxRef.current = createSafeAudioContext();
         }, []);
 
         // Simple WebAudio synth for short SFX
@@ -657,6 +419,24 @@
       
       // Refs for card animation
       const cardRefs = useRef({});
+
+      // Minimal Card component used in JSX below
+      const Card = ({ card, index, type }) => {
+        const isRevealed = card.revealed !== false;
+        return (
+          <div key={index} className={`w-20 h-28 rounded-lg shadow-lg flex flex-col items-center justify-center relative transform transition-all ${isRevealed ? 'bg-white' : 'bg-slate-700'} `}>
+            {isRevealed ? (
+              <>
+                <div className={`absolute top-2 left-2 text-sm text-black`}>{card.rank}</div>
+                <div className={`text-3xl ${getCardColor(card.suit)} `} style={{color: getCardColor(card.suit) === 'text-red-600' ? '#b91c1c' : '#000'}}>{getSuitSymbol(card.suit)}</div>
+                <div className={`absolute bottom-2 right-2 text-sm text-black`}>{card.rank}</div>
+              </>
+            ) : (
+              <div className="text-2xl text-white">🂠</div>
+            )}
+          </div>
+        );
+      };
       
       // Handle dealing animation
       useEffect(() => {
@@ -729,27 +509,14 @@
       // Hit - Deal another card to player
       const hitMe = () => {
         if (gameState.animatingCard) return;
-        
         dealPlayerCard();
-        
         // Check if player busts
         setTimeout(() => {
-          const playerTotal = calculateHandValue(
-            [...gameState.playerCards, generateRandomCard()]
-          );
-          
+          const playerTotal = calculateHandValue(gameState.playerCards);
           if (playerTotal > 21) {
             // Player busts
-            setGameState(prev => ({
-              ...prev, 
-              status: 'dealerTurn',
-              dealerSecondCardRevealed: true
-            }));
-            
-            setTimeout(() => {
-              playSound('lose');
-              setGameState(prev => ({ ...prev, status: 'complete', result: 'lose' }));
-            }, 1000);
+            playSound('lose');
+            setGameState(prev => ({ ...prev, status: 'complete', result: 'lose' }));
           }
         }, 500);
       };
@@ -757,54 +524,61 @@
       // Stand - End player's turn and start dealer's turn
       const stand = () => {
         if (gameState.animatingCard) return;
-        
         setGameState(prev => ({
           ...prev,
           status: 'dealerTurn',
           dealerSecondCardRevealed: true
         }));
-        
-        // Reveal dealer's hole card with animation
         playSound('cardFlip');
-        
-        // Dealer draws until 17 or higher
         setTimeout(() => {
           let currentDealerCards = [...gameState.dealerCards];
           currentDealerCards[1].revealed = true;
-          
-          const dealerValue = calculateHandValue(currentDealerCards);
-          
-          // If dealer has less than 17, draw more cards
-          if (dealerValue < 17) {
+          // Dealer draws until 17 or higher
+          let dealerValue = calculateHandValue(currentDealerCards);
+          while (dealerValue < 17) {
             const newCard = generateRandomCard();
             playSound('cardFlip');
             currentDealerCards.push(newCard);
+            dealerValue = calculateHandValue(currentDealerCards);
           }
-          
-          const finalDealerValue = calculateHandValue(currentDealerCards);
           const playerValue = calculateHandValue(gameState.playerCards);
-          
           let result = 'lose';
           let payout = 0;
-          
-          // Determine winner
-          if (finalDealerValue > 21 || playerValue > finalDealerValue) {
+          // Real blackjack rules:
+          if (playerValue > 21) {
+            // Player busts
+            result = 'lose';
+            playSound('lose');
+          } else if (dealerValue > 21) {
+            // Dealer busts, player wins
             result = 'win';
-            payout = gameState.currentBet * 2; // Original bet + winnings
+            payout = gameState.currentBet * 2;
             playSound('win');
-          } else if (playerValue === finalDealerValue) {
+          } else if (playerValue === dealerValue) {
+            // Push
             result = 'push';
-            payout = gameState.currentBet; // Return original bet
+            payout = gameState.currentBet;
+            playSound('win');
+          } else if (playerValue > dealerValue) {
+            // Player wins
+            result = 'win';
+            payout = gameState.currentBet * 2;
             playSound('win');
           } else {
+            // Dealer wins
+            result = 'lose';
             playSound('lose');
           }
-          
-          // Update balance if win or push
+          // Blackjack payout (Ace + 10/J/Q/K as first two cards)
+          const isBlackjack = gameState.playerCards.length === 2 &&
+            ((gameState.playerCards[0].rank === 'A' && ['10','J','Q','K'].includes(gameState.playerCards[1].rank)) ||
+             (gameState.playerCards[1].rank === 'A' && ['10','J','Q','K'].includes(gameState.playerCards[0].rank)));
+          if (isBlackjack && result === 'win') {
+            payout = Math.floor(gameState.currentBet * 2.5); // 3:2 payout
+          }
           if (payout > 0) {
             onUpdateBalance(payout, `blackjack-${result}`);
           }
-          
           setGameState(prev => ({ 
             ...prev, 
             status: 'complete', 
@@ -815,44 +589,58 @@
       };
       
       // Calculate hand value considering Aces
+      // Calculate hand value (J/Q/K=10, Ace=1 or 11, best for hand)
       const calculateHandValue = (cards) => {
         let total = 0;
         let aces = 0;
-        
         cards.forEach(card => {
-          if (card.revealed) {
+          if (card.revealed !== false) {
             if (card.rank === 'A') {
               aces++;
-              total += 11;
+            } else if (["J","Q","K"].includes(card.rank)) {
+              total += 10;
             } else {
-              total += card.value;
+              total += parseInt(card.rank);
             }
           }
         });
-        
-        // Adjust for Aces if over 21
-        while (total > 21 && aces > 0) {
-          total -= 10; // Convert an Ace from 11 to 1
-          aces--;
+        // Add aces as 11 if it doesn't bust, otherwise as 1
+        for (let i = 0; i < aces; i++) {
+          if (total + 11 <= 21 - (aces - 1 - i)) total += 11;
+          else total += 1;
         }
-        
         return total;
       };
+      // Helper: isSoft17 (dealer stands on soft 17)
+      const isSoft17 = (cards) => {
+        let total = 0;
+        let aces = 0;
+        cards.forEach(card => {
+          if (card.revealed !== false) {
+            if (card.rank === 'A') {
+              aces++;
+            } else if (["J","Q","K"].includes(card.rank)) {
+              total += 10;
+            } else {
+              total += parseInt(card.rank);
+            }
+          }
+        });
+        // If hand contains Ace counted as 11 and total is 17, it's soft 17
+        return aces > 0 && total + 11 + (aces - 1) === 17;
+      };
       
-      // Get hand display value
+      // Get hand display value (optionally hide dealer's hole card)
       const getHandValue = (cards, hideSecond = false) => {
-        if (cards.length === 0) return '';
-        
+        if (!cards || cards.length === 0) return '';
         if (hideSecond && cards.length > 1) {
-          // Only count visible cards
           const visibleCards = [cards[0]];
           return calculateHandValue(visibleCards);
         }
-        
         return calculateHandValue(cards);
       };
-      
-      // Start a new game
+
+      // Reset for a new round
       const playAgain = () => {
         setGameState({
           playerCards: [],
@@ -864,58 +652,6 @@
           dealingCard: null,
           animatingCard: false
         });
-      };
-      
-      // Rendering the 3D card
-      const Card = ({ card, index, isDealing = false, type }) => {
-        if (!card) return null;
-        
-        const isAnimating = gameState.dealingCard && 
-                           gameState.dealingCard.target === type && 
-                           index === (type === 'player' ? gameState.playerCards.length - 1 : gameState.dealerCards.length - 1);
-        
-        const cardClasses = `
-          relative w-24 h-36 rounded-lg shadow-lg 
-          ${isAnimating ? 'animate-card-deal' : ''} 
-          transform transition-all duration-300
-          ${card.revealed ? 'bg-white' : 'bg-blue-700 bg-opacity-90'}
-          hover:shadow-xl hover:-translate-y-1
-          flex flex-col justify-center items-center
-          border-2 border-gray-200
-          ${getCardColor(card.suit)}
-        `;
-        
-        return (
-          <div 
-            className={cardClasses}
-            style={{ 
-              perspective: '1000px',
-              transformStyle: 'preserve-3d',
-              animation: isAnimating ? 'dealCard 0.5s ease-out forwards' : '',
-            }}
-            ref={el => {
-              if (el) cardRefs.current[`${type}-${index}`] = el;
-            }}
-          >
-            {card.revealed ? (
-              <>
-                <div className="absolute top-2 left-2 text-xl font-bold">
-                  {card.rank}
-                </div>
-                <div className="text-4xl">
-                  {getSuitSymbol(card.suit)}
-                </div>
-                <div className="absolute bottom-2 right-2 text-xl font-bold rotate-180">
-                  {card.rank}
-                </div>
-              </>
-            ) : (
-              <div className="w-full h-full flex items-center justify-center">
-                <div className="text-2xl text-white">🂠</div>
-              </div>
-            )}
-          </div>
-        );
       };
       
       return (
@@ -964,39 +700,41 @@
               <div className="flex flex-col items-center">
                 <p className="text-gray-300 mb-3">Select your bet:</p>
                 <div className="flex flex-wrap gap-4 justify-center">
-                  {[10, 25, 50, 100, 500].map((amount) => (
-                    <button 
-                      key={amount}
-                      onClick={() => placeBet(amount)} 
-                      disabled={amount > balance}
-                      className={`
-                        relative group flex items-center justify-center 
-                        w-24 h-24 rounded-full transition-all 
-                        ${amount > balance ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:scale-110'}
-                      `}
-                    >
-                      <div className={`
-                        absolute inset-0 rounded-full shadow-lg transition-all duration-300
-                        ${amount === 10 ? 'bg-red-600' : ''}
-                        ${amount === 25 ? 'bg-green-600' : ''}
-                        ${amount === 50 ? 'bg-blue-600' : ''}
-                        ${amount === 100 ? 'bg-purple-600' : ''}
-                        ${amount === 500 ? 'bg-yellow-600' : ''}
-                        group-hover:shadow-xl
-                      `}></div>
-                      <div className={`
-                        absolute inset-2 rounded-full border-2 border-white border-opacity-20
-                        ${amount === 10 ? 'bg-red-500' : ''}
-                        ${amount === 25 ? 'bg-green-500' : ''}
-                        ${amount === 50 ? 'bg-blue-500' : ''}
-                        ${amount === 100 ? 'bg-purple-500' : ''}
-                        ${amount === 500 ? 'bg-yellow-500' : ''}
-                      `}></div>
-                      <span className="relative font-bold text-white text-lg">
-                        ${amount}
-                      </span>
-                    </button>
-                  ))}
+                  {[
+                    { amount: 10, unlock: 0 },
+                    { amount: 25, unlock: 0 },
+                    { amount: 50, unlock: 0 },
+                    { amount: 100, unlock: 0 },
+                    { amount: 500, unlock: 0 },
+                    { amount: 1000, unlock: 1000 },
+                    { amount: 5000, unlock: 5000 },
+                    { amount: 10000, unlock: 10000 }
+                  ].map(({ amount, unlock }) => {
+                    const unlocked = balance >= unlock;
+                    const affordable = amount <= balance;
+                    const disabled = !unlocked || !affordable;
+                    // color mapping for small/large chips
+                    const colorClass = amount === 10 ? 'bg-red-600' : amount === 25 ? 'bg-green-600' : amount === 50 ? 'bg-blue-600' : amount === 100 ? 'bg-purple-600' : amount === 500 ? 'bg-yellow-600' : amount === 1000 ? 'bg-pink-600' : amount === 5000 ? 'bg-indigo-600' : 'bg-amber-600';
+                    const innerColor = amount === 10 ? 'bg-red-500' : amount === 25 ? 'bg-green-500' : amount === 50 ? 'bg-blue-500' : amount === 100 ? 'bg-purple-500' : amount === 500 ? 'bg-yellow-500' : amount === 1000 ? 'bg-pink-500' : amount === 5000 ? 'bg-indigo-500' : 'bg-amber-500';
+                    return (
+                      <button
+                        key={amount}
+                        onClick={() => placeBet(amount)}
+                        disabled={disabled}
+                        className={`relative group flex items-center justify-center w-24 h-24 rounded-full transition-all ${disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer hover:scale-110'}`}
+                        title={unlocked ? (affordable ? `Bet $${amount}` : `Need $${amount} to place this bet`) : `Unlocks at $${unlock.toLocaleString()}`}
+                      >
+                        <div className={`absolute inset-0 rounded-full shadow-lg transition-all duration-300 ${colorClass} group-hover:shadow-xl`}></div>
+                        <div className={`absolute inset-2 rounded-full border-2 border-white border-opacity-20 ${innerColor}`}></div>
+                        <span className="relative font-bold text-white text-lg">
+                          ${amount >= 1000 ? (amount/1000) + 'k' : amount}
+                        </span>
+                        {!unlocked && (
+                          <div className="absolute -top-2 right-0 text-xs text-white bg-black bg-opacity-60 px-2 py-0.5 rounded-lg">🔒</div>
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -1093,15 +831,18 @@
       const [tab, setTab] = useState("mines");
       const [balance, setBalance] = useState(1000);
       const [user, setUser] = useState(null);
-  const crashRootRef = React.useRef(null);
-  const crashInstanceRef = React.useRef(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+      const [sidebarOpen, setSidebarOpen] = useState(false); // Default mobile-first closed
+      const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+      
+  // Crash game now implemented as a pure React component (no external loader)
+      
       const USERS = [
         { username: "daniel", password: "admin" },
         { username: "michael", password: "uwudemon69" },
         { username: "admin", password: "admin" },
         { username: "kaydona", password: "kaydona" }
       ];
+      
       // Auto-login from remembered user (localStorage) using stored username+password
       useEffect(()=>{
         try{
@@ -1123,6 +864,7 @@
         }catch(e){}
         setUser(null);
       };
+      
       // Keyboard shortcut: Ctrl+Shift+A opens admin panel (only for admin user)
       useEffect(() => {
         function onKey(e){
@@ -1142,53 +884,36 @@
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
       }, [user]);
-      // when switching tabs, lazy-load crash game and init/destroy
-      useEffect(()=>{
-        let active = true;
-        async function loadCrash(){
-          if (tab !== 'crash'){
-            if (crashInstanceRef.current){ try{ crashInstanceRef.current.destroy(); }catch(e){} crashInstanceRef.current = null; }
-            return;
-          }
-          try{
-            // Use a real ES module script to perform the import natively in the browser.
-            // Babel (the inline JSX script) can transpile dynamic import() into a
-            // CommonJS-style require() call which leads to `ReferenceError: require is not defined`.
-            // Inject a script[type=module] that does the native import and stores the
-            // init function on window.__initCrash.
-            if (!window.__crash_module_loaded){
-              // inject a module script that assigns a global promise which we can await
-              const s = document.createElement('script');
-              s.type = 'module';
-              s.textContent = `
-                window.__crash_import_promise = import('./crash-game.js')
-                  .then(m => { window.__initCrash = m.initCrashGame; window.__crash_module_loaded = true; return true; })
-                  .catch(e => { window.__crash_module_load_err = e; throw e; });
-              `;
-              document.head.appendChild(s);
-              // await the promise set by the module script
-              await window.__crash_import_promise;
-            }
-            if (!active) return;
-            if (crashInstanceRef.current) { try{ crashInstanceRef.current.destroy(); }catch(e){} }
-            if (window.__initCrash) {
-              crashInstanceRef.current = window.__initCrash(crashRootRef.current, { 
-                clientSeed: 'demo',
-                getBalance: () => balance,
-                setBalance: (newBalance) => setBalance(newBalance)
-              });
-            } else {
-              throw new Error('Crash init function not found after module load');
-            }
-          }catch(err){ console.error('Failed to load crash module', err); }
+      
+  // Removed legacy crash loader: now using in-app React CrashGame component.
+      
+      // Close mobile menu when tab changes
+      useEffect(() => {
+        setMobileMenuOpen(false);
+      }, [tab]);
+      
+      const gameCategories = [
+        {
+          id: 'originals',
+          name: '🎮 Originals',
+          games: [
+            { key: 'mines', label: '💣 Mines', description: 'Navigate the minefield' },
+            { key: 'crash', label: '🚀 Crash', description: 'Watch the multiplier soar' },
+            { key: 'wheel', label: '🎰 Wheel', description: 'Spin to win big' },
+            { key: 'plinko', label: '🎯 Plinko', description: 'Drop balls for prizes' }
+          ]
+        },
+        {
+          id: 'casino',
+          name: '🎲 Casino Classics',
+          games: [
+            { key: 'baccarat', label: '🃏 Baccarat', description: 'High-stakes card game' },
+            { key: 'blackjack', label: '♠️ Blackjack', description: 'Beat the dealer to 21' },
+            { key: 'roulette', label: '🎡 Roulette', description: 'European roulette wheel' }
+          ]
         }
-        loadCrash();
-        return ()=>{ active = false; };
-      },[tab]);
+      ];
 
-      useEffect(()=>{
-        return ()=>{ if (crashInstanceRef.current){ try{ crashInstanceRef.current.destroy(); }catch(e){} crashInstanceRef.current = null; } }
-      },[]);
       if (!user) {
         return <LoginModal onLogin={u=>setUser(u)} users={USERS} />;
       }
@@ -1212,7 +937,13 @@
                 <button onClick={()=>{ setTab('mines'); setSidebarOpen(false); }} className={`text-left px-3 py-3 rounded-xl mobile-touch-target ${tab==='mines'?'bg-slate-800 text-white':'text-slate-300 hover:bg-slate-800/60'}`}>Mines</button>
                 <button onClick={()=>{ setTab('plinko'); setSidebarOpen(false); }} className={`text-left px-3 py-3 rounded-xl mobile-touch-target ${tab==='plinko'?'bg-slate-800 text-white':'text-slate-300 hover:bg-slate-800/60'}`}>Plinko</button>
                 <button onClick={()=>{ setTab('crash'); setSidebarOpen(false); }} className={`text-left px-3 py-3 rounded-xl mobile-touch-target ${tab==='crash'?'bg-slate-800 text-white':'text-slate-300 hover:bg-slate-800/60'}`}>Crash</button>
+                <button onClick={()=>{ setTab('balloon'); setSidebarOpen(false); }} className={`text-left px-3 py-3 rounded-xl mobile-touch-target ${tab==='balloon'?'bg-slate-800 text-white':'text-slate-300 hover:bg-slate-800/60'}`}>Balloon</button>
+                <button onClick={()=>{ setTab('dice'); setSidebarOpen(false); }} className={`text-left px-3 py-3 rounded-xl mobile-touch-target ${tab==='dice'?'bg-slate-800 text-white':'text-slate-300 hover:bg-slate-800/60'}`}>Dice</button>
                 <button onClick={()=>{ setTab('blackjack'); setSidebarOpen(false); }} className={`text-left px-3 py-3 rounded-xl mobile-touch-target ${tab==='blackjack'?'bg-slate-800 text-white':'text-slate-300 hover:bg-slate-800/60'}`}>Blackjack</button>
+                <button onClick={()=>{ setTab('roulette'); setSidebarOpen(false); }} className={`text-left px-3 py-3 rounded-xl mobile-touch-target ${tab==='roulette'?'bg-slate-800 text-white':'text-slate-300 hover:bg-slate-800/60'}`}>Roulette</button>
+                <button onClick={()=>{ setTab('baccarat'); setSidebarOpen(false); }} className={`text-left px-3 py-3 rounded-xl mobile-touch-target ${tab==='baccarat'?'bg-slate-800 text-white':'text-slate-300 hover:bg-slate-800/60'}`}>Baccarat</button>
+                <button onClick={()=>{ setTab('wheel'); setSidebarOpen(false); }} className={`text-left px-3 py-3 rounded-xl mobile-touch-target ${tab==='wheel'?'bg-slate-800 text-white':'text-slate-300 hover:bg-slate-800/60'}`}>Wheel</button>
+                <button onClick={()=>{ setTab('tower'); setSidebarOpen(false); }} className={`text-left px-3 py-3 rounded-xl mobile-touch-target ${tab==='tower'?'bg-slate-800 text-white':'text-slate-300 hover:bg-slate-800/60'}`}>Tower</button>
               </div>
             </aside>
 
@@ -1257,7 +988,13 @@
                   { id: "mines", label: "Mines" },
                   { id: "plinko", label: "Plinko" }, 
                   { id: "crash", label: "Crash" },
-                  { id: "blackjack", label: "Blackjack" }
+                  { id: "balloon", label: "Balloon" },
+                  { id: "dice", label: "Dice" },
+                  { id: "blackjack", label: "Blackjack" },
+                  { id: "roulette", label: "Roulette" },
+                  { id: "baccarat", label: "Baccarat" },
+                  { id: "wheel", label: "Wheel" },
+                  { id: "tower", label: "Tower" }
                 ].map(t => (
                   <button 
                     key={t.id} 
@@ -1271,24 +1008,20 @@
             </nav>
             <div className="w-full flex flex-col items-center justify-center" style={{minHeight: 'calc(100vh - 260px)'}}>
               <div className="flex flex-col items-center justify-center w-full">
-                {tab === "mines" ? (
-                  <MinesGame balance={balance} setBalance={setBalance} />
-                ) : tab === 'plinko' ? (
-                  <PlinkoGame balance={balance} setBalance={setBalance} />
-                ) : tab === 'blackjack' ? (
+                {tab === 'mines' && <MinesGame balance={balance} setBalance={setBalance} />}
+                {tab === 'plinko' && <PlinkoGame balance={balance} setBalance={setBalance} />}
+                {tab === 'crash' && <CrashGame balance={balance} setBalance={setBalance} />}
+                {tab === 'balloon' && <BalloonGame balance={balance} setBalance={setBalance} />}
+                {tab === 'dice' && <DiceGame balance={balance} setBalance={setBalance} />}
+                {tab === 'blackjack' && (
                   <div className="w-full max-w-5xl mx-auto">
-                    <BlackjackGame 
-                      balance={balance} 
-                      onUpdateBalance={(amount, reason) => {
-                        setBalance(prev => prev + amount);
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <div className="w-full overflow-x-auto">
-                    <div id="crash-root" ref={crashRootRef} className="min-w-full" />
+                    <BlackjackGame balance={balance} onUpdateBalance={(amount)=>setBalance(b=>b+amount)} />
                   </div>
                 )}
+                {tab === 'roulette' && <RouletteGame balance={balance} setBalance={setBalance} />}
+                {tab === 'baccarat' && <BaccaratGame balance={balance} setBalance={setBalance} />}
+                {tab === 'wheel' && <WheelGame balance={balance} setBalance={setBalance} />}
+                {tab === 'tower' && <TowerGame balance={balance} setBalance={setBalance} />}
               </div>
             </div>
           </div>
@@ -1390,6 +1123,1760 @@
                 Login
               </button>
             </form>
+          </div>
+        </div>
+      );
+    }
+
+    /*********************** ROULETTE GAME ***********************/
+    function RouletteGame({ balance, setBalance }) {
+      // Numbers & colors (European single zero)
+      const numbers = useMemo(()=>Array.from({length:37}, (_,i)=>i), []);
+      const redSet = useMemo(()=> new Set([1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]), []);
+      const colorOf = (n)=> n===0 ? 'green' : (redSet.has(n)?'red':'black');
+      
+      // Betting
+      const [chip, setChip] = useState(5);
+      const chipValues = [1,5,10,25,50,100,250,500];
+      const [bets, setBets] = useState([]); // {id,type,value,payout,amount}
+      const totalBet = bets.reduce((a,b)=>a+b.amount,0);
+      
+      // Wheel state
+      const [spinning, setSpinning] = useState(false);
+      const [wheelAngle, setWheelAngle] = useState(0);
+      const [result, setResult] = useState(null);
+      const [lastWin, setLastWin] = useState(0);
+      const [anticipation, setAnticipation] = useState(false);
+      const [resultAnim, setResultAnim] = useState(false);
+      const wheelRef = useRef(null);
+      const lastTickRef = useRef(0);
+  const lastSegRef = useRef(0); // track previous segment for tick detection
+  const tickTimeRef = useRef(0); // ms timestamp of last tick sound
+      
+      // Enhanced audio with reduced frequency
+      const audioContext = useRef(null);
+      const lastTickTime = useRef(0);
+      
+      const playTick = useCallback((progress=0)=>{
+        // progress 0 -> start, 1 -> end of spin
+        const now = performance.now();
+        // Dynamic interval grows as wheel slows (mimic friction): 25ms -> 180ms
+        const minInterval = 25;
+        const maxInterval = 180;
+        const needed = minInterval + (maxInterval - minInterval) * (progress*progress); // quadratic easing
+        if (now - tickTimeRef.current < needed) return;
+        tickTimeRef.current = now;
+        
+        if(window.GamblAudio) { 
+          // Optional: could map to multiple tick variants later
+          window.GamblAudio.play('tick');
+          return; 
+        }
+        try {
+          if (!audioContext.current) {
+            audioContext.current = new (window.AudioContext||window.webkitAudioContext)();
+          }
+          const ctx = audioContext.current;
+          const o = ctx.createOscillator();
+          const g = ctx.createGain();
+          o.type='square';
+            // Pitch falls slightly as progress increases
+          const startF = 1400, endF = 500;
+          o.frequency.value = startF + (endF - startF) * (progress*progress);
+          g.gain.value = 0.06 + 0.04 * (1 - progress); // a bit louder early
+          o.connect(g);
+          g.connect(ctx.destination);
+          o.start();
+          o.stop(ctx.currentTime + 0.025 + 0.015*progress); // slightly longer tail near end
+        } catch(e){}
+      },[]);
+      
+      const playWin = useCallback(()=>{
+        if(window.GamblAudio) { 
+          window.GamblAudio.play('win'); 
+          return; 
+        }
+        try{ 
+          if (!audioContext.current) {
+            audioContext.current = new (window.AudioContext||window.webkitAudioContext)();
+          }
+          const ctx = audioContext.current; 
+          const o=ctx.createOscillator(); 
+          const g=ctx.createGain(); 
+          o.type='triangle'; 
+          o.frequency.setValueAtTime(420,ctx.currentTime); 
+          o.frequency.linearRampToValueAtTime(900, ctx.currentTime+0.4); 
+          g.gain.setValueAtTime(0.001,ctx.currentTime); 
+          g.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime+0.05); 
+          g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime+0.5); 
+          o.connect(g); 
+          g.connect(ctx.destination); 
+          o.start(); 
+          o.stop(ctx.currentTime+0.55);
+        }catch(e){}
+      },[]);
+      
+      const remainingBalance = balance - totalBet;
+      
+      const placeBet = (type,value,payout)=>{
+        if (spinning) return; 
+        if (chip>remainingBalance || chip<=0) return;
+        
+        setAnticipation(true);
+        setTimeout(() => setAnticipation(false), 200);
+        
+        if(window.GamblAudio) window.GamblAudio.play('chip_place');
+        setBets(b=>[...b,{id:Math.random().toString(36).slice(2), type, value, payout, amount:chip}]);
+      };
+      
+      const clearBets = ()=>{ 
+        if(spinning) return; 
+        setBets([]);
+        if(window.GamblAudio) window.GamblAudio.play('chip_clear');
+      };
+      
+      const spin = ()=>{
+        if (spinning || bets.length===0) return;
+        
+        setBalance(b=>b-totalBet);
+        setSpinning(true); 
+        setResult(null);
+        setLastWin(0);
+        setResultAnim(false);
+        
+        if(window.GamblAudio) window.GamblAudio.play('wheel_spin');
+        
+        const winningNumber = Math.floor(Math.random()*37);
+        const segmentAngle = 360/37;
+        const targetAngle = wheelAngle + 360*12 + (360 - winningNumber*segmentAngle) + segmentAngle/2;
+        setWheelAngle(targetAngle);
+        
+        const start = performance.now();
+        const duration = 6000; // Longer spin for more anticipation
+  lastSegRef.current = -1; // reset segment tracker
+  tickTimeRef.current = performance.now();
+        
+        function animate(ts){
+          const t = Math.min(1,(ts-start)/duration);
+          const eased = 1-Math.pow(1-t,4); // More dramatic easing
+          const current = wheelAngle + (targetAngle - wheelAngle)*eased;
+          
+          if (wheelRef.current) {
+            wheelRef.current.style.transform = `rotate(${current}deg)`;
+            // Dynamic glow effect during spin
+            const intensity = 20 + Math.sin(ts*0.02)*10;
+            wheelRef.current.style.filter = `drop-shadow(0 0 ${intensity}px rgba(245, 158, 11, 0.6)) saturate(1.3) brightness(1.1)`;
+          }
+          
+          // Controlled tick detection
+          const seg = Math.floor(((current%360)+360)%360 / segmentAngle);
+          if (seg !== lastSegRef.current){
+            lastSegRef.current = seg;
+            // adaptive tick with slowdown pitch & spacing
+            playTick(t);
+          }
+          
+          if (t<1){ 
+            requestAnimationFrame(animate);
+          } else {
+            // Calculate results
+            const number = winningNumber; 
+            const color = colorOf(number);
+            let win=0;
+            
+            bets.forEach(b=>{
+              let ok=false; 
+              const n = number;
+              if (b.type==='number' && b.value===n) ok=true;
+              if (b.type==='color' && b.value===color) ok=true;
+              if (b.type==='oddEven' && n!==0 && (n%2 === (b.value==='even'?0:1))) ok=true;
+              if (b.type==='dozen' && n>=b.value[0] && n<=b.value[1]) ok=true;
+              if (b.type==='column' && n!==0 && ((n-1)%3)===b.value) ok=true;
+              if (ok) win += b.amount * b.payout;
+            });
+            
+            setLastWin(win);
+            if (win>0){ 
+              setBalance(b=>b+win); 
+              playWin();
+              if (win >= totalBet * 5) { try{ window.spawnConfetti && window.spawnConfetti(); }catch(e){} }
+              if(window.GamblAudio && win > totalBet * 5) window.GamblAudio.play('big_win');
+              if(window.GamblAudio && win > totalBet * 10) window.GamblAudio.play('confetti');
+              // Popup feedback
+              try{ window.showResultPopup && window.showResultPopup({ title:'Roulette Win', message:`Hit ${number} (${color.toUpperCase()}) — Won €${win}`, color:'emerald'});}catch(e){}
+            } else {
+              if(window.GamblAudio) window.GamblAudio.play('lose');
+              try{ window.showResultPopup && window.showResultPopup({ title:'Roulette Lose', message:`Hit ${number} (${color.toUpperCase()}) — Lost €${totalBet}`, color:'rose'});}catch(e){}
+            }
+            
+            setResult({number, color}); 
+            setResultAnim(true);
+            setBets([]); 
+            setSpinning(false); 
+            setWheelAngle(targetAngle%360);
+          }
+        }
+        requestAnimationFrame(animate);
+      };
+      
+      return (
+        <div className="w-full max-w-7xl mx-auto bg-gradient-to-br from-gray-900 via-purple-900 to-indigo-900 rounded-3xl p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-6 border border-purple-500/30 shadow-2xl">
+          {/* Enhanced header */}
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+            <h2 className="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-wide bg-gradient-to-r from-purple-400 via-pink-500 to-red-500 bg-clip-text text-transparent">
+              🎰 European Roulette 🎰
+            </h2>
+            
+            {/* Chip selector with vibrant styling */}
+            <div className="flex flex-wrap gap-2 bg-gray-800/80 rounded-xl p-2 backdrop-blur">
+              {chipValues.map(v=>{
+                const active = v===chip;
+                const chipColor = v <= 5 ? 'from-gray-600 to-gray-700' :
+                                v <= 25 ? 'from-blue-600 to-blue-700' :
+                                v <= 100 ? 'from-green-600 to-green-700' :
+                                v <= 250 ? 'from-purple-600 to-purple-700' :
+                                'from-yellow-500 to-orange-500';
+                
+                return (
+                  <button 
+                    key={v} 
+                    onClick={()=>setChip(v)} 
+                    className={`w-12 h-12 sm:w-14 sm:h-14 text-xs sm:text-sm font-bold rounded-full relative transition-all transform ${
+                      active
+                        ? 'scale-110 ring-4 ring-cyan-400 shadow-lg shadow-cyan-500/50' 
+                        : 'hover:scale-105 hover:shadow-md'
+                    } bg-gradient-to-br ${chipColor} text-white border-2 border-white/20`}
+                  >
+                    €{v}
+                    {active && (
+                      <div className="absolute inset-0 bg-cyan-400/20 rounded-full animate-pulse"></div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            
+            {/* Game controls */}
+            <div className="flex items-center gap-3 ml-auto">
+              <div className="flex items-center gap-2 text-sm px-3 py-2 rounded-full bg-purple-800/60 backdrop-blur border border-purple-500/30">
+                Total Bet: <span className="font-semibold text-cyan-400">€{totalBet}</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm px-3 py-2 rounded-full bg-purple-800/60 backdrop-blur border border-purple-500/30">
+                Balance: <span className="font-semibold text-green-400">€{remainingBalance}</span>
+              </div>
+              <button 
+                onClick={clearBets} 
+                disabled={spinning||bets.length===0} 
+                className="px-4 py-2 rounded-xl bg-gray-700/80 text-sm font-medium disabled:opacity-40 hover:bg-gray-600/80 transition-all border border-gray-600/50"
+              >
+                Clear
+              </button>
+              <button 
+                onClick={spin} 
+                disabled={spinning||bets.length===0} 
+                className={`px-6 py-3 rounded-xl font-bold text-sm sm:text-base transition-all transform shadow-lg ${
+                  spinning 
+                    ? 'bg-gradient-to-r from-orange-500 to-red-500 animate-pulse' 
+                    : 'bg-gradient-to-r from-purple-500 via-pink-500 to-red-500 hover:scale-105 shadow-purple-500/50'
+                } text-white disabled:opacity-50`}
+              >
+                {spinning ? '🔥 SPINNING...' : '🎯 SPIN WHEEL'}
+              </button>
+            </div>
+          </div>
+          
+          <div className="grid gap-6 lg:gap-8 xl:grid-cols-2">
+            {/* Enhanced Wheel */}
+            <div className="flex justify-center">
+              <div className={`relative w-80 h-80 sm:w-96 sm:h-96 ${anticipation ? 'animate-bounce' : ''}`}>
+                <svg 
+                  viewBox="0 0 200 200" 
+                  className="absolute inset-0 w-full h-full" 
+                  preserveAspectRatio="xMidYMid meet"
+                  style={{filter: 'drop-shadow(0 0 20px rgba(168, 85, 247, 0.4))'}}
+                >
+                  <defs>
+                    <filter id="wheelGlow" x="-50%" y="-50%" width="200%" height="200%">
+                      <feGaussianBlur stdDeviation="4" result="coloredBlur" />
+                      <feMerge>
+                        <feMergeNode in="coloredBlur" />
+                        <feMergeNode in="SourceGraphic" />
+                      </feMerge>
+                    </filter>
+                    
+                    <radialGradient id="centerGrad" cx="30%" cy="30%">
+                      <stop offset="0%" stopColor="#fbbf24"/>
+                      <stop offset="50%" stopColor="#f59e0b"/>
+                      <stop offset="100%" stopColor="#d97706"/>
+                    </radialGradient>
+                    
+                    <linearGradient id="rimGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#a855f7"/>
+                      <stop offset="33%" stopColor="#ec4899"/>
+                      <stop offset="66%" stopColor="#06b6d4"/>
+                      <stop offset="100%" stopColor="#a855f7"/>
+                    </linearGradient>
+                  </defs>
+                  
+                  {/* wheel group rotates */}
+                  <g ref={wheelRef} style={{transformOrigin: '100px 100px', transition: 'transform 0s'}}>
+                    {/* outer rim with gradient */}
+                    <circle 
+                      cx="100" 
+                      cy="100" 
+                      r="98" 
+                      fill="#0b1220" 
+                      stroke="url(#rimGrad)" 
+                      strokeWidth="6"
+                      className={spinning ? 'animate-pulse' : ''}
+                    />
+                    
+                    {/* sectors with enhanced styling */}
+                    {
+                      (function(){
+                        const segs = [];
+                        const segAngle = 360 / numbers.length;
+                        const cx = 100, cy = 100, r = 90, labelR = 70;
+                        function toRad(a){ return (a-90) * Math.PI / 180; }
+                        
+                        for(let i=0;i<numbers.length;i++){
+                          const start = i * segAngle;
+                          const end = start + segAngle;
+                          const large = end - start > 180 ? 1 : 0;
+                          const x1 = cx + r * Math.cos(toRad(start));
+                          const y1 = cy + r * Math.sin(toRad(start));
+                          const x2 = cx + r * Math.cos(toRad(end));
+                          const y2 = cy + r * Math.sin(toRad(end));
+                          
+                          const num = numbers[i];
+                          const color = (function(n){ 
+                            if(n===0) return '#059669'; 
+                            return (redSet.has(n)? '#dc2626' : '#1f2937'); 
+                          })(num);
+                          
+                          const path = `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} Z`;
+                          const mid = start + segAngle/2;
+                          const lx = cx + labelR * Math.cos(toRad(mid));
+                          const ly = cy + labelR * Math.sin(toRad(mid));
+                          
+                          const isWinning = result && result.number === num && resultAnim;
+                          
+                          segs.push({path, color, label: num, lx, ly, mid, isWinning});
+                        }
+                        
+                        return segs.map((s,idx)=> (
+                          <g key={idx}>
+                            <path 
+                              d={s.path} 
+                              fill={s.color} 
+                              stroke={s.isWinning ? "#fbbf24" : "#ffffff20"} 
+                              strokeWidth={s.isWinning ? "3" : "0.8"}
+                              filter={s.isWinning ? "url(#wheelGlow)" : ""}
+                              className={s.isWinning ? "animate-pulse" : ""}
+                            />
+                            <text 
+                              x={s.lx} 
+                              y={s.ly} 
+                              fill={s.isWinning ? "#fbbf24" : "#fff"} 
+                              fontSize="10" 
+                              fontWeight="800" 
+                              textAnchor="middle" 
+                              dominantBaseline="middle" 
+                              style={{
+                                pointerEvents:'none', 
+                                textShadow: s.isWinning ? '0 0 10px #fbbf24' : '2px 2px 4px rgba(0,0,0,0.8)'
+                              }}
+                            >
+                              {s.label}
+                            </text>
+                          </g>
+                        ));
+                      })()
+                    }
+                    
+                    {/* enhanced center hub */}
+                    <circle 
+                      cx="100" 
+                      cy="100" 
+                      r="32" 
+                      fill="url(#centerGrad)" 
+                      stroke="#a855f7" 
+                      strokeWidth="3" 
+                      filter="url(#wheelGlow)" 
+                    />
+                    <circle 
+                      cx="100" 
+                      cy="100" 
+                      r="20" 
+                      fill="#1f2937" 
+                      stroke="#06b6d4" 
+                      strokeWidth="2" 
+                    />
+                    <text 
+                      x="100" 
+                      y="100" 
+                      fill="#f8e3b8" 
+                      fontSize="8" 
+                      fontWeight="800" 
+                      textAnchor="middle" 
+                      dominantBaseline="middle"
+                      style={{textShadow: '0 0 5px rgba(248, 227, 184, 0.5)'}}
+                    >
+                      ROULETTE
+                    </text>
+                  </g>
+                  
+                  {/* enhanced pointer */}
+                  <g>
+                    <polygon 
+                      points="100,8 94,28 106,28" 
+                      fill="url(#centerGrad)" 
+                      stroke="#a855f7" 
+                      strokeWidth="2" 
+                      className="drop-shadow-lg" 
+                      filter="url(#wheelGlow)"
+                    />
+                    <circle cx="100" cy="22" r="4" fill="#fff" stroke="#a855f7" strokeWidth="1"/>
+                  </g>
+                </svg>
+                
+                {/* Enhanced pointer indicator */}
+                <div className="absolute -top-8 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[15px] border-r-[15px] border-b-[35px] border-l-transparent border-r-transparent border-b-gradient-to-b from-yellow-400 to-orange-500 filter drop-shadow-lg">
+                  <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 w-4 h-4 bg-gradient-to-br from-yellow-400 to-orange-500 rounded-full border-2 border-white shadow-lg"></div>
+                </div>
+              </div>
+            </div>
+            
+            {/* Enhanced Betting Grid */}
+            <div className="space-y-4">
+              {/* Numbers grid */}
+              <div className="grid grid-cols-12 gap-1 text-xs select-none">
+                {numbers.map(n=>{
+                  const col = colorOf(n);
+                  const placed = bets.filter(b=>b.type==='number' && b.value===n);
+                  const placedTotal = placed.reduce((a,b)=>a+b.amount,0);
+                  const isWinning = result && result.number === n && resultAnim;
+                  
+                  return (
+                    <div 
+                      key={n} 
+                      onClick={()=>placeBet('number',n,36)} 
+                      className={`
+                        relative cursor-pointer aspect-square flex items-center justify-center rounded-lg font-bold text-white transition-all transform
+                        ${col==='red'
+                          ? 'bg-gradient-to-br from-red-600 to-red-800 hover:from-red-500 hover:to-red-700'
+                          : col==='black'
+                            ? 'bg-gradient-to-br from-gray-600 to-gray-800 hover:from-gray-500 hover:to-gray-700'
+                            : 'bg-gradient-to-br from-green-600 to-green-800 hover:from-green-500 hover:to-green-700'
+                        }
+                        hover:scale-105 hover:shadow-lg
+                        ${isWinning ? 'ring-4 ring-yellow-400 animate-pulse shadow-lg shadow-yellow-500/50' : ''}
+                        ${placedTotal > 0 ? 'ring-2 ring-cyan-400' : ''}
+                      `}
+                    >
+                      {n}
+                      {placedTotal>0 && (
+                        <span className="absolute -top-1 -right-1 text-[9px] px-1.5 py-0.5 rounded-full bg-cyan-400 text-gray-900 font-bold min-w-[16px] text-center">
+                          {placedTotal}
+                        </span>
+                      )}
+                      {isWinning && (
+                        <div className="absolute inset-0 bg-yellow-400/30 rounded-lg animate-ping"></div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              
+              {/* Outside bets with enhanced styling */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 text-sm">
+                {[
+                  {type:'color', value:'red', payout:2, label:'🔴 Red', color:'from-red-500 to-red-600'},
+                  {type:'color', value:'black', payout:2, label:'⚫ Black', color:'from-gray-600 to-gray-700'},
+                  {type:'oddEven', value:'even', payout:2, label:'📊 Even', color:'from-blue-600 to-blue-700'},
+                  {type:'oddEven', value:'odd', payout:2, label:'📈 Odd', color:'from-purple-600 to-purple-700'},
+                  {type:'dozen', value:[1,12], payout:3, label:'1st 12', color:'from-green-600 to-green-700'},
+                  {type:'dozen', value:[13,24], payout:3, label:'2nd 12', color:'from-yellow-600 to-yellow-700'},
+                  {type:'dozen', value:[25,36], payout:3, label:'3rd 12', color:'from-orange-600 to-orange-700'},
+                  {type:'column', value:0, payout:3, label:'Col 1', color:'from-pink-600 to-pink-700'},
+                  {type:'column', value:1, payout:3, label:'Col 2', color:'from-indigo-600 to-indigo-700'},
+                  {type:'column', value:2, payout:3, label:'Col 3', color:'from-teal-600 to-teal-700'}
+                ].map((bet, i) => {
+                  const placed = bets.filter(b=>b.type===bet.type && JSON.stringify(b.value)===JSON.stringify(bet.value));
+                  const placedTotal = placed.reduce((a,b)=>a+b.amount,0);
+                  
+                  return (
+                    <button 
+                      key={i}
+                      onClick={()=>placeBet(bet.type, bet.value, bet.payout)} 
+                      className={`
+                        relative px-3 py-3 rounded-xl font-semibold text-white transition-all transform
+                        bg-gradient-to-br ${bet.color} hover:scale-105 hover:shadow-lg
+                        ${placedTotal > 0 ? 'ring-2 ring-cyan-400 shadow-lg shadow-cyan-500/30' : ''}
+                      `}
+                    >
+                      {bet.label}
+                      <div className="text-xs opacity-75">{bet.payout}:1</div>
+                      {placedTotal>0 && (
+                        <span className="absolute -top-1 -right-1 text-xs px-1.5 py-0.5 rounded-full bg-cyan-400 text-gray-900 font-bold">
+                          {placedTotal}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+              
+              {/* Results display */}
+              {result && (
+                <div className={`p-6 rounded-xl backdrop-blur border transition-all transform ${
+                  lastWin > 0
+                    ? 'bg-gradient-to-r from-green-500/20 to-emerald-500/20 border-green-400/50 animate-pulse'
+                    : 'bg-gradient-to-r from-gray-500/20 to-slate-500/20 border-gray-400/50'
+                }`}>
+                  <div className="text-center space-y-2">
+                    <div className="text-2xl font-bold">
+                      🎯 Winning Number: 
+                      <span className={`ml-2 px-4 py-2 rounded-full font-black text-xl ${
+                        result.color==='red' ? 'bg-red-500 text-white' :
+                        result.color==='black' ? 'bg-gray-800 text-white' :
+                        'bg-green-500 text-white'
+                      }`}>
+                        {result.number}
+                      </span>
+                    </div>
+                    {lastWin > 0 ? (
+                      <div className="space-y-2">
+                        <div className="text-2xl font-bold text-green-400 animate-bounce">
+                          🎉 WIN: +€{lastWin} 🎉
+                        </div>
+                        <div className="text-lg text-yellow-400">
+                          Multiplier: {(lastWin / totalBet).toFixed(2)}x
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-xl text-gray-400">
+                        Better luck next spin! 🍀
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+              
+              {/* Betting summary */}
+              {bets.length>0 && (
+                <div className="text-sm text-gray-400 bg-gray-800/40 rounded-lg p-3 border border-gray-700/30">
+                  <span className="text-purple-300 font-semibold">Active Bets:</span> {bets.map((b,i)=>`${b.type}:${Array.isArray(b.value)?b.value.join('-'):b.value} (€${b.amount})`).join(', ')}
+                </div>
+              )}
+              
+              {!spinning && bets.length === 0 && (
+                <div className="text-sm text-gray-400 bg-gray-800/40 rounded-lg p-4 border border-gray-700/30">
+                  <div className="font-semibold text-purple-300 mb-2">🎰 How to Play European Roulette:</div>
+                  <ul className="text-left space-y-1">
+                    <li>• Select chip value and click numbers or betting areas</li>
+                    <li>• Single numbers pay 35:1, colors/even-odd pay 1:1</li>
+                    <li>• Dozens and columns pay 2:1</li>
+                    <li>• Green 0 wins only for direct number bets</li>
+                    <li>• Click SPIN when ready to play!</li>
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    /*********************** BACCARAT GAME ***********************/
+    function BaccaratGame({ balance, setBalance }) {
+      const [bet, setBet] = useState(50);
+      const [playerCards, setPlayerCards] = useState([]);
+      const [bankerCards, setBankerCards] = useState([]);
+      const [playerBets, setPlayerBets] = useState({ player: 0, banker: 0, tie: 0 });
+      const [results, setResults] = useState(null);
+      const [gameState, setGameState] = useState('betting'); // betting, dealing, result
+      const [chipSelection, setChipSelection] = useState(50);
+      const [showPayout, setShowPayout] = useState(false);
+      const [isDealing, setIsDealing] = useState(false);
+      const [dealAnimation, setDealAnimation] = useState(null);
+      const [cardFlipIndex, setCardFlipIndex] = useState(-1);
+      const [turboMode, setTurboMode] = useState(false);
+      const [deckPosition, setDeckPosition] = useState({ x: 50, y: 50 });
+      
+      const chipValues = [5, 10, 25, 50, 100, 250, 500];
+      const totalBets = playerBets.player + playerBets.banker + playerBets.tie;
+      const remainingBalance = balance - totalBets;
+      
+      // 8-deck shoe
+      const createShoe = () => {
+        const suits = ['♠', '♥', '♦', '♣'];
+        const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+        const shoe = [];
+        for (let deck = 0; deck < 8; deck++) {
+          for (let suit of suits) {
+            for (let rank of ranks) {
+              shoe.push({ suit, rank, value: rank === 'A' ? 1 : ['J', 'Q', 'K'].includes(rank) ? 0 : parseInt(rank) });
+            }
+          }
+        }
+        return shoe.sort(() => Math.random() - 0.5);
+      };
+      
+      const [shoe, setShoe] = useState(() => createShoe());
+      
+      const getCardValue = (cards) => (cards.reduce((sum, card) => sum + card.value, 0) % 10);
+      
+      const playSound = (sound) => {
+        if (window.GamblAudio) {
+          window.GamblAudio.play(sound);
+        }
+      };
+      
+      const placeBet = (type) => {
+        if (gameState !== 'betting' || chipSelection > remainingBalance) return;
+        playSound('chip_place');
+        setPlayerBets(prev => ({ ...prev, [type]: prev[type] + chipSelection }));
+      };
+      
+      const clearBets = () => {
+        if (gameState !== 'betting') return;
+        setPlayerBets({ player: 0, banker: 0, tie: 0 });
+        playSound('chip_clear');
+      };
+      
+      const dealCard = async (to, index, delay = 0) => {
+        return new Promise(resolve => {
+          setTimeout(() => {
+            const newCard = shoe.pop();
+            if (!newCard) {
+              resolve();
+              return;
+            }
+            
+            setShoe(prev => prev.filter(c => c !== newCard));
+            
+            if (to === 'player') {
+              setPlayerCards(prev => [...prev, newCard]);
+            } else {
+              setBankerCards(prev => [...prev, newCard]);
+            }
+            
+            // Card flip animation
+            setCardFlipIndex(index);
+            setTimeout(() => setCardFlipIndex(-1), 600);
+            
+            playSound('card_deal');
+            setDealAnimation({ to, index, card: newCard });
+            
+            setTimeout(() => {
+              setDealAnimation(null);
+              resolve();
+            }, turboMode ? 300 : 800);
+          }, delay);
+        });
+      };
+      
+      const playGame = async () => {
+        if (totalBets === 0 || gameState !== 'betting') {
+          try{ console.warn('playGame aborted', { totalBets, gameState, chipSelection, remainingBalance }); }catch(e){}
+          return;
+        }
+        
+        setBalance(prev => prev - totalBets);
+        setGameState('dealing');
+        setIsDealing(true);
+        
+        // Reset game state
+        setPlayerCards([]);
+        setBankerCards([]);
+        setResults(null);
+        setShowPayout(false);
+        
+        playSound('game_start');
+        
+        const dealDelay = turboMode ? 200 : 600;
+        
+        // Create fresh shoe copy for dealing
+        const gameshoe = [...shoe];
+        const takeCard = () => gameshoe.pop();
+        
+        // Deal initial 4 cards
+        const initialCards = {
+          player: [takeCard(), takeCard()],
+          banker: [takeCard(), takeCard()]
+        };
+        
+        // Update state with initial cards
+        setPlayerCards(initialCards.player);
+        setBankerCards(initialCards.banker);
+        setShoe(gameshoe);
+        
+        // Animate dealing with delays
+        await new Promise(resolve => setTimeout(resolve, dealDelay));
+        
+        // Calculate values for third card rules
+        let playerValue = getCardValue(initialCards.player);
+        let bankerValue = getCardValue(initialCards.banker);
+        
+        let finalPlayerCards = [...initialCards.player];
+        let finalBankerCards = [...initialCards.banker];
+        
+        // Apply third card rules if no natural
+        if (playerValue < 8 && bankerValue < 8) {
+          // Player third card
+          if (playerValue <= 5) {
+            const playerThirdCard = takeCard();
+            if (playerThirdCard) {
+              finalPlayerCards.push(playerThirdCard);
+              setPlayerCards(finalPlayerCards);
+              await new Promise(resolve => setTimeout(resolve, dealDelay));
+              playerValue = getCardValue(finalPlayerCards);
+            }
+          }
+          
+          // Banker third card rules
+          const playerThirdValue = finalPlayerCards[2]?.value || 0;
+          const shouldBankerDraw = 
+            (bankerValue <= 2) ||
+            (bankerValue === 3 && playerThirdValue !== 8) ||
+            (bankerValue === 4 && [2,3,4,5,6,7].includes(playerThirdValue)) ||
+            (bankerValue === 5 && [4,5,6,7].includes(playerThirdValue)) ||
+            (bankerValue === 6 && [6,7].includes(playerThirdValue));
+            
+          if (shouldBankerDraw) {
+            const bankerThirdCard = takeCard();
+            if (bankerThirdCard) {
+              finalBankerCards.push(bankerThirdCard);
+              setBankerCards(finalBankerCards);
+              await new Promise(resolve => setTimeout(resolve, dealDelay));
+              bankerValue = getCardValue(finalBankerCards);
+            }
+          }
+        }
+        
+        // Update shoe
+        setShoe(gameshoe.length > 50 ? gameshoe : createShoe());
+        
+        // Determine winner
+        const winner = playerValue > bankerValue ? 'player' : 
+                      bankerValue > playerValue ? 'banker' : 'tie';
+        
+        // Calculate winnings
+        let winnings = 0;
+        if (winner === 'player' && playerBets.player > 0) winnings += playerBets.player * 2;
+        if (winner === 'banker' && playerBets.banker > 0) winnings += Math.floor(playerBets.banker * 1.95);
+        if (winner === 'tie' && playerBets.tie > 0) winnings += playerBets.tie * 9;
+        
+        // Show results after delay
+        setTimeout(() => {
+          setResults({ winner, playerValue, bankerValue, winnings });
+          setGameState('result');
+          setIsDealing(false);
+          
+          if (winnings > 0) {
+            setBalance(prev => prev + winnings);
+            setShowPayout(true);
+            playSound('win');
+            setTimeout(() => setShowPayout(false), 3000);
+          } else {
+            playSound('lose');
+          }
+          
+          // Auto-reset for next round
+          setTimeout(() => {
+            setPlayerBets({ player: 0, banker: 0, tie: 0 });
+            setGameState('betting');
+          }, turboMode ? 2000 : 4000);
+        }, turboMode ? 500 : 1500);
+      };
+      
+      const CardComponent = ({ card, position, isDealing, flipIndex, index }) => (
+        <div 
+          className={`relative w-12 h-16 sm:w-16 sm:h-20 lg:w-20 lg:h-28 transition-all duration-700 ${
+            isDealing && flipIndex === index ? 'animate-spin' : ''
+          } ${dealAnimation?.to === position && dealAnimation?.index === index ? 'animate-bounce' : ''}`}
+          style={{
+            transform: isDealing && dealAnimation?.to === position && dealAnimation?.index === index 
+              ? `translateX(${Math.random() * 20 - 10}px) translateY(${Math.random() * 20 - 10}px) rotateY(180deg)` 
+              : 'none'
+          }}
+        >
+          <div className="w-full h-full bg-white rounded-lg border-2 border-slate-300 shadow-lg flex flex-col justify-between p-1 sm:p-2 relative overflow-hidden">
+            <div className="absolute inset-0 bg-gradient-to-br from-white via-slate-50 to-slate-100"></div>
+            <div className="relative z-10">
+              <div className={`text-xs sm:text-sm lg:text-lg font-bold ${
+                ['♥', '♦'].includes(card.suit) ? 'text-red-500' : 'text-slate-800'
+              }`}>
+                {card.rank}
+              </div>
+              <div className={`text-lg sm:text-xl lg:text-2xl ${
+                ['♥', '♦'].includes(card.suit) ? 'text-red-500' : 'text-slate-800'
+              }`}>
+                {card.suit}
+              </div>
+            </div>
+            <div className={`relative z-10 text-xs sm:text-sm lg:text-lg font-bold transform rotate-180 ${
+              ['♥', '♦'].includes(card.suit) ? 'text-red-500' : 'text-slate-800'
+            }`}>
+              {card.rank}
+            </div>
+          </div>
+        </div>
+      );
+      
+      return (
+        <div className="w-full max-w-7xl mx-auto bg-gradient-to-br from-emerald-900 via-emerald-800 to-emerald-900 rounded-3xl p-3 sm:p-6 lg:p-8 space-y-4 sm:space-y-6 border border-emerald-700/50 shadow-2xl">
+          {/* Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+            <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold tracking-wide bg-gradient-to-r from-emerald-400 via-green-500 to-emerald-600 bg-clip-text text-transparent">
+              🃏 Baccarat Pro
+            </h2>
+            
+            <div className="flex items-center gap-2 sm:gap-3">
+              <button 
+                onClick={() => setTurboMode(!turboMode)}
+                className={`px-3 py-1.5 rounded-lg text-xs sm:text-sm font-semibold transition-all ${
+                  turboMode 
+                    ? 'bg-gradient-to-r from-orange-500 to-red-500 text-white' 
+                    : 'bg-emerald-700/60 text-emerald-200 hover:bg-emerald-600/60'
+                }`}
+              >
+                ⚡ Turbo {turboMode ? 'ON' : 'OFF'}
+              </button>
+              
+              <div className="px-2 sm:px-3 py-1 sm:py-1.5 rounded-full bg-emerald-800/60 backdrop-blur text-xs sm:text-sm">
+                Shoe: <span className="text-emerald-300 font-semibold">{shoe.length}</span>
+              </div>
+            </div>
+          </div>
+          
+          {/* Betting Controls */}
+          <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3 text-xs sm:text-sm">
+            <div className="flex flex-wrap gap-1 sm:gap-2 bg-emerald-800/60 rounded-xl p-1 backdrop-blur">
+              {chipValues.map(v => (
+                <button 
+                  key={v}
+                  onClick={() => setChipSelection(v)}
+                  className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full text-[10px] sm:text-[11px] font-bold transition-all ${
+                    v === chipSelection
+                      ? 'ring-2 ring-emerald-400 scale-105 bg-gradient-to-br from-emerald-400 to-green-500 text-emerald-900 shadow-lg' 
+                      : 'bg-gradient-to-br from-emerald-600 to-emerald-700 text-white hover:scale-105'
+                  }`}
+                >
+                  €{v}
+                </button>
+              ))}
+            </div>
+            
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="px-2 sm:px-3 py-1 sm:py-1.5 rounded-full bg-emerald-800/60 backdrop-blur">
+                Total Bet: <span className="text-emerald-400 font-semibold">€{totalBets}</span>
+              </div>
+              <div className="px-2 sm:px-3 py-1 sm:py-1.5 rounded-full bg-emerald-800/60 backdrop-blur">
+                Balance: <span className="text-blue-400 font-semibold">€{remainingBalance}</span>
+              </div>
+              
+              <button 
+                onClick={clearBets}
+                disabled={gameState !== 'betting' || totalBets === 0}
+                className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-emerald-700/80 disabled:opacity-40 hover:bg-emerald-600/80 transition-all text-xs sm:text-sm font-medium"
+              >
+                Clear
+              </button>
+            </div>
+          </div>
+          
+          {/* Game Table */}
+          <div className="relative bg-gradient-to-br from-emerald-800 to-emerald-900 rounded-2xl p-4 sm:p-6 border border-emerald-600/30 overflow-hidden">
+            {/* Table pattern (non-interactive overlay so it doesn't block controls) */}
+            <div className="absolute inset-0 opacity-10 pointer-events-none">
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_transparent_40%,_#065f46_100%)] pointer-events-none"></div>
+            </div>
+            
+            {/* Dealer cards area */}
+            <div className="relative z-10 mb-6 sm:mb-8">
+              <div className="text-center mb-3">
+                <h3 className="text-sm sm:text-lg font-semibold text-emerald-200 mb-2">BANKER</h3>
+                <div className="flex justify-center gap-1 sm:gap-2 min-h-[64px] sm:min-h-[80px] lg:min-h-[112px]">
+                  {bankerCards.map((card, index) => (
+                    <CardComponent 
+                      key={index} 
+                      card={card} 
+                      position="banker" 
+                      isDealing={isDealing}
+                      flipIndex={cardFlipIndex}
+                      index={index}
+                    />
+                  ))}
+                </div>
+                {bankerCards.length > 0 && (
+                  <div className="mt-2 text-lg sm:text-xl font-bold text-white">
+                    Value: {getCardValue(bankerCards)}
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            {/* Betting areas */}
+            <div className="grid grid-cols-3 gap-2 sm:gap-4 mb-6 sm:mb-8">
+              {[
+                { key: 'player', label: 'PLAYER', payout: '1:1', color: 'from-blue-600 to-blue-700' },
+                { key: 'tie', label: 'TIE', payout: '8:1', color: 'from-purple-600 to-purple-700' },
+                { key: 'banker', label: 'BANKER', payout: '1:0.95', color: 'from-red-600 to-red-700' }
+              ].map(bet => (
+                <button 
+                  key={bet.key}
+                  onClick={() => placeBet(bet.key)}
+                  disabled={gameState !== 'betting' || chipSelection > remainingBalance}
+                  className={`relative group bg-gradient-to-br ${bet.color} rounded-xl p-3 sm:p-4 border-2 border-white/20 disabled:opacity-50 hover:scale-105 transition-all shadow-lg min-h-[80px] sm:min-h-[100px]`}
+                >
+                  <div className="text-white font-bold text-sm sm:text-lg">{bet.label}</div>
+                  <div className="text-white/80 text-xs sm:text-sm">{bet.payout}</div>
+                  {playerBets[bet.key] > 0 && (
+                    <div className="absolute -top-2 -right-2 bg-yellow-400 text-yellow-900 text-xs font-bold rounded-full w-6 h-6 sm:w-8 sm:h-8 flex items-center justify-center">
+                      €{playerBets[bet.key]}
+                    </div>
+                  )}
+                  
+                  {/* Chip stack visualization */}
+                  {playerBets[bet.key] > 0 && (
+                    <div className="absolute bottom-2 right-2 flex flex-col-reverse">
+                      {Array.from({ length: Math.min(5, Math.floor(playerBets[bet.key] / chipSelection)) }).map((_, i) => (
+                        <div 
+                          key={i} 
+                          className="w-6 h-2 sm:w-8 sm:h-3 bg-gradient-to-br from-yellow-400 to-yellow-500 rounded-full border border-yellow-600"
+                          style={{ marginBottom: `-${i * 2}px`, zIndex: i }}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </button>
+              ))}
+            </div>
+            
+            {/* Player cards area */}
+            <div className="relative z-10">
+              <div className="text-center">
+                <div className="flex justify-center gap-1 sm:gap-2 min-h-[64px] sm:min-h-[80px] lg:min-h-[112px] mb-3">
+                  {playerCards.map((card, index) => (
+                    <CardComponent 
+                      key={index} 
+                      card={card} 
+                      position="player" 
+                      isDealing={isDealing}
+                      flipIndex={cardFlipIndex}
+                      index={index}
+                    />
+                  ))}
+                </div>
+                <h3 className="text-sm sm:text-lg font-semibold text-emerald-200 mb-2">PLAYER</h3>
+                {playerCards.length > 0 && (
+                  <div className="text-lg sm:text-xl font-bold text-white">
+                    Value: {getCardValue(playerCards)}
+                  </div>
+                )}
+              </div>
+            </div>
+            
+            {/* Deal button */}
+            <div className="text-center mt-6">
+              <button 
+                onClick={() => {
+                  try{ console.log('DEAL CLICKED', { totalBets, gameState, playerBets, shoeLength: shoe.length }); }catch(e){}
+                  // small visual pulse to confirm click
+                  const btn = document?.activeElement;
+                  if (btn && btn.classList) {
+                    btn.classList.add('ring-2','ring-yellow-300');
+                    setTimeout(()=>btn.classList.remove('ring-2','ring-yellow-300'), 400);
+                  }
+                  playGame();
+                }}
+                disabled={gameState !== 'betting' || totalBets === 0}
+                className="px-6 sm:px-8 py-3 sm:py-4 bg-gradient-to-r from-emerald-500 via-green-600 to-emerald-700 text-white font-bold text-sm sm:text-lg rounded-xl disabled:opacity-50 hover:scale-105 transition-all shadow-lg"
+              >
+                {gameState === 'dealing' ? (
+                  <span className="flex items-center gap-2">
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    Dealing...
+                  </span>
+                ) : '🎯 DEAL'}
+              </button>
+            </div>
+          </div>
+          
+          {/* Results */}
+          {results && (
+            <div className={`text-center p-4 sm:p-6 rounded-xl border transition-all ${
+              results.winnings > 0 
+                ? 'bg-gradient-to-r from-green-600/20 to-emerald-600/20 border-green-500/50' 
+                : 'bg-gradient-to-r from-red-600/20 to-rose-600/20 border-red-500/50'
+            }`}>
+              <div className="text-lg sm:text-xl font-bold mb-2">
+                {results.winnings > 0 ? (
+                  <span className="text-green-400">💰 You Win!</span>
+                ) : (
+                  <span className="text-red-400">❌ You Lose!</span>
+                )}
+                <div className="text-sm text-white/80 mt-1">{results.winner.toUpperCase()} WINS — Player: {results.playerValue}, Banker: {results.bankerValue}</div>
+              </div>
+              {results.winnings > 0 ? (
+                <div className="text-xl sm:text-2xl font-bold text-green-400 animate-pulse">
+                  +€{results.winnings}
+                </div>
+              ) : null}
+            </div>
+          )}
+          
+          {/* Payout animation */}
+          {showPayout && results?.winnings > 0 && (
+            <div className="fixed inset-0 pointer-events-none z-50 flex items-center justify-center">
+              <div className="text-4xl sm:text-6xl font-bold text-yellow-400 animate-bounce drop-shadow-lg">
+                +€{results.winnings} 🎉
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    /*********************** WHEEL OF FORTUNE ***********************/
+    function WheelGame({ balance, setBalance }) {
+      const riskSegments = {
+        low:  [ 
+          {m:2,c:'#7c3aed',nc:'#a855f7'},{m:3,c:'#dc2626',nc:'#ef4444'},{m:2,c:'#059669',nc:'#10b981'},
+          {m:1,c:'#ea580c',nc:'#f97316'},{m:0,c:'#1f2937',nc:'#374151'},{m:4,c:'#0ea5e9',nc:'#38bdf8'},
+          {m:2,c:'#65a30d',nc:'#84cc16'},{m:0,c:'#1f2937',nc:'#374151'}
+        ],
+        medium:[ 
+          {m:5,c:'#7c2d12',nc:'#dc2626'},{m:8,c:'#c026d3',nc:'#d946ef'},{m:2,c:'#059669',nc:'#10b981'},
+          {m:0,c:'#1f2937',nc:'#374151'},{m:3,c:'#0ea5e9',nc:'#38bdf8'},{m:10,c:'#ca8a04',nc:'#eab308'},
+          {m:0,c:'#1f2937',nc:'#374151'},{m:2,c:'#7c3aed',nc:'#a855f7'}
+        ],
+        high: [ 
+          {m:0,c:'#1f2937',nc:'#374151'},{m:25,c:'#dc2626',nc:'#f87171'},{m:0,c:'#1f2937',nc:'#374151'},
+          {m:15,c:'#c026d3',nc:'#e879f9'},{m:0,c:'#1f2937',nc:'#374151'},{m:20,c:'#0ea5e9',nc:'#7dd3fc'},
+          {m:12,c:'#ea580c',nc:'#fb923c'},{m:0,c:'#1f2937',nc:'#374151'}
+        ]
+      };
+      
+      const [risk,setRisk] = useState('low');
+      const [segments,setSegments] = useState(riskSegments.low);
+      const [chip,setChip] = useState(10);
+      const [bets,setBets] = useState([]);
+      const [angle,setAngle] = useState(0);
+      const [spinning,setSpinning] = useState(false);
+      const [outcome,setOutcome] = useState(null);
+      const [glowEffect, setGlowEffect] = useState(false);
+      const [anticipation, setAnticipation] = useState(false);
+      
+      const totalBet = bets.reduce((a,b)=>a+b.amount,0);
+      const remaining = balance - totalBet;
+      const wheelRef = useRef(null); 
+      const lastTickRef = useRef(-1);
+      const chipVals=[5,10,25,50,100,250,500];
+      
+      const placeBet=(i)=>{ 
+        if(spinning) return; 
+        if(chip>remaining) return; 
+        if(window.GamblAudio) window.GamblAudio.play('chip_place');
+        setBets(b=>[...b,{segIndex:i, amount:chip}]); 
+        // Visual feedback
+        setAnticipation(true);
+        setTimeout(() => setAnticipation(false), 200);
+      };
+      
+      const changeRisk=(r)=>{ 
+        if(spinning) return; 
+        setRisk(r); 
+        setSegments(riskSegments[r]); 
+        setBets([]); 
+        setOutcome(null); 
+      };
+      
+      const playTick=()=>{ 
+        if(window.GamblAudio) { window.GamblAudio.play('tick'); return; }
+        try{ const ctx=new (window.AudioContext||window.webkitAudioContext)(); const o=ctx.createOscillator(); const g=ctx.createGain(); o.type='square'; o.frequency.value=1200; g.gain.value=.08; o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime+0.04);}catch(e){} 
+      };
+      
+      const playWin=()=>{ 
+        if(window.GamblAudio) { window.GamblAudio.play('win'); return; }
+        try{ const ctx=new (window.AudioContext||window.webkitAudioContext)(); ['triangle','sine'].forEach((t,i)=>{ const o=ctx.createOscillator(); const g=ctx.createGain(); o.type=t; o.frequency.setValueAtTime(400+i*150,ctx.currentTime); o.frequency.linearRampToValueAtTime(800+i*200, ctx.currentTime+.6); g.gain.setValueAtTime(.0001,ctx.currentTime); g.gain.exponentialRampToValueAtTime(.3, ctx.currentTime+.05); g.gain.exponentialRampToValueAtTime(.0001, ctx.currentTime+.7); o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime+.75); }); }catch(e){} 
+      };
+      
+      const spin=()=>{
+        if(spinning||bets.length===0) return;
+        setBalance(b=>b-totalBet); 
+        setSpinning(true); 
+        setOutcome(null);
+        setGlowEffect(true);
+        
+        if(window.GamblAudio) window.GamblAudio.play('wheel_spin');
+        
+        const segCount=segments.length; 
+        const idx=Math.floor(Math.random()*segCount); 
+        const segAngle=360/segCount; 
+        const targetAngle=angle + 360*12 + (segCount-idx)*segAngle + segAngle/2;
+        
+        const start=performance.now(); 
+        const duration=5500; 
+        
+        function anim(ts){ 
+          const t=Math.min(1,(ts-start)/duration); 
+          const eased=1-Math.pow(1-t,4); 
+          const current=angle + (targetAngle-angle)*eased; 
+          
+          if(wheelRef.current) {
+            wheelRef.current.style.transform=`rotate(${current}deg)`;
+            const intensity = 30 + Math.sin(ts*0.02)*15;
+            const currentSeg = Math.floor(((current%360)+360)%360 / segAngle);
+            const segColor = segments[currentSeg]?.nc || '#f59e0b';
+            wheelRef.current.style.filter = `drop-shadow(0 0 ${intensity}px ${segColor}) saturate(1.5) brightness(1.2)`;
+          }
+          
+          const currentSegIndex=Math.floor(((current%360)+360)%360 / segAngle); 
+          if(currentSegIndex!==lastTickRef.current && t < 0.85){ 
+            lastTickRef.current=currentSegIndex; 
+            playTick(); 
+          } 
+          
+          if(t<1){ 
+            requestAnimationFrame(anim);
+          } else { 
+            const winning=segments[idx]; 
+            let win=0; 
+            bets.forEach(b=>{ 
+              if(b.segIndex===idx && winning.m>0) win+= b.amount*winning.m; 
+            }); 
+            if(win>0){ 
+              setBalance(b=>b+win); 
+              playWin(); 
+              if(window.GamblAudio) window.GamblAudio.play('confetti');
+            } else {
+              if(window.GamblAudio) window.GamblAudio.play('lose');
+            }
+            setOutcome(winning); 
+            setBets([]); 
+            setSpinning(false); 
+            setAngle(targetAngle%360);
+            setGlowEffect(false);
+          } 
+        } 
+        requestAnimationFrame(anim); 
+      };
+      
+      return (
+        <div className="w-full max-w-6xl mx-auto bg-gradient-to-br from-gray-900 via-purple-900 to-gray-900 rounded-3xl p-3 sm:p-6 lg:p-8 space-y-4 sm:space-y-6 border border-purple-500/30 shadow-2xl">
+          {/* Header with Stake.com style */}
+          <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+            <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold tracking-wide bg-gradient-to-r from-purple-400 via-pink-500 to-red-500 bg-clip-text text-transparent">
+              🎰 Wheel of Fortune
+            </h2>
+            
+            {/* Risk selector with vibrant colors */}
+            <div className="flex gap-1 bg-gray-800/80 rounded-xl p-1 text-xs sm:text-sm backdrop-blur">
+              {['low','medium','high'].map(r=> 
+                <button 
+                  key={r} 
+                  onClick={()=>changeRisk(r)} 
+                  className={`px-2 sm:px-3 py-1.5 sm:py-2 rounded-lg capitalize font-semibold transition-all ${
+                    risk===r
+                      ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white shadow-lg transform scale-105' 
+                      : 'bg-gray-700/80 text-gray-300 hover:bg-gray-600/80 hover:text-white'
+                  }`}
+                >
+                  {r}
+                </button>
+              )}
+            </div>
+            
+            {/* Chip selector with neon style */}
+            <div className="flex flex-wrap gap-1 sm:gap-2 bg-gray-800/80 rounded-xl p-1 backdrop-blur">
+              {chipVals.map(v=> 
+                <button 
+                  key={v} 
+                  onClick={()=>setChip(v)} 
+                  className={`w-8 h-8 sm:w-10 sm:h-10 rounded-full text-[10px] sm:text-[11px] font-bold transition-all transform ${
+                    v===chip
+                      ? 'ring-2 ring-cyan-400 scale-110 bg-gradient-to-br from-cyan-400 to-blue-500 text-white shadow-lg shadow-cyan-500/50' 
+                      : 'bg-gradient-to-br from-gray-600 to-gray-700 text-white hover:scale-105 hover:shadow-md'
+                  }`}
+                >
+                  €{v}
+                </button>
+              )}
+            </div>
+          </div>
+          
+          {/* Controls with enhanced styling */}
+          <div className="flex flex-wrap items-center justify-between gap-2 sm:gap-3 text-xs sm:text-sm">
+            <div className="flex items-center gap-2 sm:gap-3">
+              <div className="px-2 sm:px-3 py-1 sm:py-1.5 rounded-full bg-purple-800/60 backdrop-blur border border-purple-500/30">
+                Bet: <span className="text-cyan-400 font-semibold">€{totalBet}</span>
+              </div>
+              <div className="px-2 sm:px-3 py-1 sm:py-1.5 rounded-full bg-purple-800/60 backdrop-blur border border-purple-500/30">
+                Balance: <span className="text-green-400 font-semibold">€{remaining}</span>
+              </div>
+            </div>
+            
+            <div className="flex items-center gap-2 sm:gap-3">
+              <button 
+                onClick={()=>setBets([])} 
+                disabled={spinning||bets.length===0} 
+                className="px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg bg-gray-700/80 disabled:opacity-40 hover:bg-gray-600/80 transition-all text-xs sm:text-sm font-medium border border-gray-600/50"
+              >
+                Clear
+              </button>
+              <button 
+                onClick={spin} 
+                disabled={spinning||bets.length===0} 
+                className={`px-4 sm:px-6 py-2 sm:py-3 rounded-xl font-bold disabled:opacity-50 transition-all shadow-lg text-sm sm:text-base transform ${
+                  spinning 
+                    ? 'bg-gradient-to-r from-orange-500 to-red-500 animate-pulse' 
+                    : 'bg-gradient-to-r from-purple-500 via-pink-500 to-red-500 hover:scale-105 shadow-purple-500/50'
+                } text-white`}
+              >
+                {spinning ? '🔥 SPINNING...' : '🎯 SPIN TO WIN'}
+              </button>
+            </div>
+          </div>
+          
+          {/* Enhanced wheel container */}
+          <div className="flex flex-col items-center gap-4 sm:gap-6">
+            <div className="relative">
+              {/* Wheel with enhanced visuals */}
+              <div className={`relative w-64 h-64 sm:w-80 sm:h-80 lg:w-96 lg:h-96 ${glowEffect ? 'animate-pulse' : ''} ${anticipation ? 'animate-bounce' : ''}`}>
+                <svg 
+                  className="absolute inset-0 w-full h-full filter"
+                  viewBox="0 0 400 400"
+                  style={{filter: 'drop-shadow(0 0 20px rgba(168, 85, 247, 0.4))'}}
+                >
+                  {/* Animated outer glow ring */}
+                  <circle 
+                    cx="200" cy="200" r="190" 
+                    fill="none" 
+                    stroke="url(#wheelGlow)" 
+                    strokeWidth="6"
+                    className={spinning ? 'animate-spin' : ''}
+                  />
+                  
+                  {/* Main wheel */}
+                  <g ref={wheelRef} style={{transformOrigin: '200px 200px'}}>
+                    {segments.map((seg,i)=>{ 
+                      const segAngle=360/segments.length;
+                      const startAngle = i * segAngle - 90;
+                      const endAngle = (i + 1) * segAngle - 90;
+                      const x1 = 200 + 180 * Math.cos(startAngle * Math.PI / 180);
+                      const y1 = 200 + 180 * Math.sin(startAngle * Math.PI / 180);
+                      const x2 = 200 + 180 * Math.cos(endAngle * Math.PI / 180);
+                      const y2 = 200 + 180 * Math.sin(endAngle * Math.PI / 180);
+                      const textAngle = startAngle + segAngle/2;
+                      const textX = 200 + 140 * Math.cos(textAngle * Math.PI / 180);
+                      const textY = 200 + 140 * Math.sin(textAngle * Math.PI / 180);
+                      const hasActiveBet = bets.some(b => b.segIndex === i);
+                      
+                      return (
+                        <g key={i}>
+                          {/* Segment with enhanced styling */}
+                          <path
+                            d={`M 200 200 L ${x1} ${y1} A 180 180 0 0 1 ${x2} ${y2} Z`}
+                            fill={`url(#grad${i})`}
+                            stroke={hasActiveBet ? '#38bdf8' : '#1f2937'}
+                            strokeWidth={hasActiveBet ? "4" : "2"}
+                            className="cursor-pointer transition-all hover:brightness-125 hover:saturate-150"
+                            onClick={()=>placeBet(i)}
+                            filter={hasActiveBet ? 'url(#betGlow)' : 'url(#segmentGlow)'}
+                          />
+                          
+                          {/* Text with enhanced styling */}
+                          <text
+                            x={textX}
+                            y={textY}
+                            textAnchor="middle"
+                            dominantBaseline="middle"
+                            fill="white"
+                            fontSize="16"
+                            fontWeight="bold"
+                            className="pointer-events-none select-none"
+                            style={{
+                              textShadow: '2px 2px 4px rgba(0,0,0,0.8)',
+                              filter: 'drop-shadow(0 0 3px rgba(255,255,255,0.3))'
+                            }}
+                          >
+                            {seg.m > 0 ? `${seg.m}x` : 'BUST'}
+                          </text>
+                          
+                          {/* Enhanced bet indicator */}
+                          {hasActiveBet && (
+                            <g>
+                              <circle
+                                cx={textX}
+                                cy={textY + 25}
+                                r="10"
+                                fill="url(#chipGlow)"
+                                stroke="#38bdf8"
+                                strokeWidth="2"
+                                className="animate-pulse"
+                              />
+                              <text
+                                x={textX}
+                                y={textY + 28}
+                                textAnchor="middle"
+                                dominantBaseline="middle"
+                                fill="white"
+                                fontSize="8"
+                                fontWeight="bold"
+                              >
+                                €
+                              </text>
+                            </g>
+                          )}
+                        </g>
+                      );
+                    })}
+                  </g>
+                  
+                  {/* Enhanced center hub */}
+                  <circle cx="200" cy="200" r="25" fill="url(#hubGrad)" stroke="#a855f7" strokeWidth="4"/>
+                  <circle cx="200" cy="200" r="15" fill="#1f2937" stroke="#06b6d4" strokeWidth="2"/>
+                  
+                  {/* Enhanced gradients and effects */}
+                  <defs>
+                    <linearGradient id="wheelGlow" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#a855f7" stopOpacity="0.8"/>
+                      <stop offset="33%" stopColor="#ec4899" stopOpacity="0.6"/>
+                      <stop offset="66%" stopColor="#06b6d4" stopOpacity="0.8"/>
+                      <stop offset="100%" stopColor="#a855f7" stopOpacity="0.8"/>
+                    </linearGradient>
+                    
+                    <radialGradient id="hubGrad" cx="30%" cy="30%">
+                      <stop offset="0%" stopColor="#a855f7"/>
+                      <stop offset="50%" stopColor="#ec4899"/>
+                      <stop offset="100%" stopColor="#6366f1"/>
+                    </radialGradient>
+                    
+                    <radialGradient id="chipGlow" cx="30%" cy="30%">
+                      <stop offset="0%" stopColor="#06b6d4"/>
+                      <stop offset="100%" stopColor="#0891b2"/>
+                    </radialGradient>
+                    
+                    <filter id="betGlow">
+                      <feGaussianBlur stdDeviation="4" result="coloredBlur"/>
+                      <feMerge> 
+                        <feMergeNode in="coloredBlur"/>
+                        <feMergeNode in="SourceGraphic"/>
+                      </feMerge>
+                    </filter>
+                    
+                    <filter id="segmentGlow">
+                      <feGaussianBlur stdDeviation="1" result="coloredBlur"/>
+                      <feMerge> 
+                        <feMergeNode in="coloredBlur"/>
+                        <feMergeNode in="SourceGraphic"/>
+                      </feMerge>
+                    </filter>
+                    
+                    {segments.map((seg,i)=> (
+                      <linearGradient key={i} id={`grad${i}`} x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor={seg.c}/>
+                        <stop offset="50%" stopColor={seg.nc || seg.c}/>
+                        <stop offset="100%" stopColor={seg.c}/>
+                      </linearGradient>
+                    ))}
+                  </defs>
+                </svg>
+                
+                {/* Enhanced pointer */}
+                <div className="absolute -top-8 left-1/2 -translate-x-1/2 z-10">
+                  <div className="w-0 h-0 border-l-[15px] border-r-[15px] border-b-[35px] border-l-transparent border-r-transparent border-b-gradient-to-b from-yellow-400 to-orange-500 filter drop-shadow-lg">
+                    <div className="absolute -bottom-3 left-1/2 -translate-x-1/2 w-3 h-3 bg-gradient-to-br from-yellow-400 to-orange-500 rounded-full border-2 border-white"></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            {/* Enhanced results display */}
+            {outcome && (
+              <div className={`text-center p-6 rounded-xl backdrop-blur border transition-all transform ${
+                outcome.m > 0 
+                  ? 'bg-gradient-to-r from-green-500/20 to-emerald-500/20 border-green-400/50 animate-pulse' 
+                  : 'bg-gradient-to-r from-red-500/20 to-rose-500/20 border-red-400/50'
+              }`}>
+                <div className="text-xl sm:text-2xl font-bold mb-2">
+                  {outcome.m > 0 ? (
+                    <span className="text-green-400">🎉 {outcome.m}x WIN! 🎉</span>
+                  ) : (
+                    <span className="text-red-400">💥 BUST 💥</span>
+                  )}
+                </div>
+                {outcome.m > 0 && (
+                  <div className="text-2xl sm:text-3xl font-bold text-yellow-400 animate-bounce">
+                    +€{bets.filter(b => b.segIndex === segments.indexOf(outcome)).reduce((sum, b) => sum + b.amount * outcome.m, 0)}
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {bets.length > 0 && (
+              <div className="text-xs sm:text-sm text-gray-400 text-center bg-gray-800/50 rounded-lg p-3 border border-gray-600/30">
+                <span className="text-purple-400 font-semibold">Active Bets:</span> {bets.map((b,i)=>`Segment ${b.segIndex+1} (€${b.amount})`).join(', ')}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    /*********************** TOWER / LADDER GAME ***********************/
+    function TowerGame({ balance, setBalance }) {
+      const [bet,setBet] = useState(10);
+      const [difficulty,setDifficulty] = useState('easy'); // easy, medium, hard
+      const [active,setActive] = useState(false);
+      const [lost,setLost] = useState(false);
+      const [level,setLevel] = useState(0);
+      const [rows,setRows] = useState([]); // each row: [{bomb,revealed,id}]
+      const [cashout,setCashout] = useState(0);
+      const [animKey,setAnimKey] = useState(0);
+      const [bombAnim,setBombAnim] = useState(null);
+      const [gemAnim,setGemAnim] = useState(null);
+  // Removed auto climb/auto mode per requirements
+      
+      const difficultyBase = {easy:1, medium:2, hard:3};
+      const difficultyConfig = {
+        easy: { gems: 3, color: "from-green-400 to-emerald-500", emoji: "💎", name: "Easy" },
+        medium: { gems: 2, color: "from-yellow-400 to-orange-500", emoji: "🔥", name: "Medium" },
+        hard: { gems: 1, color: "from-red-400 to-rose-500", emoji: "⚡", name: "Hard" }
+      };
+      
+      const rndId = ()=> Math.random().toString(36).slice(2);
+      const buildRow = (cols, bombs)=>{ 
+        const arr= Array.from({length:cols},()=>({bomb:false,revealed:false,id:rndId()})); 
+        let placed=0; 
+        while(placed<bombs){ 
+          const i=Math.floor(Math.random()*cols); 
+          if(!arr[i].bomb){ 
+            arr[i].bomb=true; 
+            placed++; 
+          } 
+        } 
+        return arr; 
+      };
+      
+      const bombCount = (cols,lvl)=> Math.min(cols-1, difficultyBase[difficulty] + Math.floor(lvl/3));
+      const colsFor = (lvl)=> Math.max(2, 6 - Math.floor(lvl/3));
+      const nextRow = (lvl)=>{ const cols = colsFor(lvl); return buildRow(cols, bombCount(cols,lvl)); };
+      
+      const start = ()=>{ 
+        if(active) return; 
+        if(bet<=0||bet>balance) return; 
+        setBalance(b=>b-bet); 
+        setActive(true); 
+        setLost(false); 
+        setLevel(0); 
+        const r0=nextRow(0); 
+        setRows([r0]); 
+        setCashout(bet); 
+        setAnimKey(k=>k+1); 
+        setBombAnim(null);
+        setGemAnim(null);
+        
+        if(window.GamblAudio) window.GamblAudio.play('game_start');
+      };
+      
+      const reveal = (ci)=>{
+        if(!active||lost) return; 
+        const current = rows[rows.length-1]; 
+        const cell = current[ci]; 
+        if(cell.revealed) return; 
+        
+        cell.revealed=true; 
+        setRows(r=>[...r.slice(0,-1), [...current]]);
+        
+        if(cell.bomb){ 
+          setBombAnim({row: rows.length-1, col: ci});
+          setLost(true); 
+          setActive(false); 
+          
+          if(window.GamblAudio) window.GamblAudio.play('bomb_explode');
+          return; 
+        }
+        
+        setGemAnim({row: rows.length-1, col: ci});
+        setTimeout(() => setGemAnim(null), 600);
+        
+        const newLevel = level+1; 
+        setLevel(newLevel);
+        const mult = 1 + newLevel * (difficulty==='easy'?0.25: difficulty==='medium'?0.45:0.7);
+        setCashout(Math.round(bet*mult));
+        
+        if(window.GamblAudio) window.GamblAudio.play('gem_found');
+        
+        if(newLevel >= 12) {
+          // Tower complete!
+          setBalance(b=>b+Math.round(bet*mult));
+          setActive(false);
+          if(window.GamblAudio) window.GamblAudio.play('tower_complete');
+          setTimeout(() => {
+            if(window.GamblAudio) window.GamblAudio.play('confetti');
+          }, 300);
+          return;
+        }
+        
+        const next = nextRow(newLevel); 
+        setRows(r=>[...r, next]);
+      };
+      
+      const doCashout = ()=>{ 
+        if(!active||lost) return; 
+        setBalance(b=>b+cashout); 
+        setActive(false);
+        
+        if(window.GamblAudio) window.GamblAudio.play('cash_out');
+        if(cashout > bet * 3 && window.GamblAudio) window.GamblAudio.play('big_win');
+      };
+      
+      const autoPlay = () => {
+        if(!active || lost) return;
+  };
+      
+      const reset = ()=>{ 
+        setActive(false); 
+        setLost(false); 
+        setRows([]); 
+        setLevel(0); 
+        setCashout(0);
+        setBombAnim(null);
+        setGemAnim(null);
+        
+      };
+      
+      const currentConfig = difficultyConfig[difficulty];
+      
+      return (
+  <div className="w-full max-w-4xl mx-auto bg-gradient-to-br from-gray-900 via-purple-900 to-indigo-900 rounded-3xl p-4 sm:p-6 lg:p-8 space-y-4 sm:space-y-6 border border-purple-500/30 shadow-2xl">
+          {/* Enhanced header */}
+          <div className="text-center space-y-2">
+            <h2 className="text-2xl sm:text-3xl font-bold tracking-wide bg-gradient-to-r from-purple-400 via-pink-500 to-red-500 bg-clip-text text-transparent">
+              🐲 Dragon Tower 🐲
+            </h2>
+            <p className="text-sm text-gray-300">Climb the mystical tower and avoid the dragon's traps!</p>
+          </div>
+          
+          {/* Enhanced controls */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-purple-300">Bet Amount</label>
+              <input 
+                type="number" 
+                value={bet} 
+                onChange={e=>setBet(Math.max(1,Number(e.target.value)||1))} 
+                disabled={active}
+                className="w-full px-3 py-2 bg-gray-800/80 border border-purple-500/30 rounded-lg text-white text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent" 
+                min="1" 
+                max={balance}
+              />
+            </div>
+            
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-purple-300">Difficulty</label>
+              <div className="flex bg-gray-800/60 rounded-lg p-1">
+                {['easy','medium','hard'].map(d=> 
+                  <button 
+                    key={d} 
+                    disabled={active} 
+                    onClick={()=>setDifficulty(d)} 
+                    className={`flex-1 px-2 py-1.5 rounded text-xs font-semibold transition-all ${
+                      d===difficulty
+                        ? `bg-gradient-to-r ${difficultyConfig[d].color} text-white transform scale-105`
+                        : 'bg-gray-700/60 text-gray-300 hover:bg-gray-600/60'
+                    }`}
+                  >
+                    {difficultyConfig[d].emoji} {difficultyConfig[d].name}
+                  </button>
+                )}
+              </div>
+            </div>
+            
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-purple-300">Level</label>
+              <div className="px-3 py-2 bg-gray-800/60 border border-purple-500/30 rounded-lg text-center">
+                <span className="text-cyan-400 font-bold text-sm">{level}/12</span>
+              </div>
+            </div>
+            
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-purple-300">Multiplier</label>
+              <div className="px-3 py-2 bg-gray-800/60 border border-purple-500/30 rounded-lg text-center">
+                <span className="text-yellow-400 font-bold text-sm">{(cashout/bet).toFixed(2)}x</span>
+              </div>
+            </div>
+            
+            <div className="space-y-1">
+              <label className="text-xs font-semibold text-purple-300">Win Amount</label>
+              <div className="px-3 py-2 bg-gray-800/60 border border-purple-500/30 rounded-lg text-center">
+                <span className="text-green-400 font-bold text-sm">€{cashout}</span>
+              </div>
+            </div>
+          </div>
+          
+          {/* Action buttons */}
+          <div className="flex flex-wrap gap-3 justify-center">
+            {!active && (
+              <button 
+                onClick={start} 
+                disabled={bet<=0||bet>balance}
+                className={`px-6 py-3 rounded-xl font-bold text-sm transition-all transform shadow-lg ${
+                  bet<=0||bet>balance
+                    ? 'bg-gray-700 text-gray-400 cursor-not-allowed'
+                    : `bg-gradient-to-r ${currentConfig.color} text-white hover:scale-105 shadow-purple-500/50`
+                }`}
+              >
+                🎮 Start Climb (€{bet})
+              </button>
+            )}
+            
+            {active && !lost && (
+              <div className="flex flex-wrap gap-3">
+                <button 
+                  onClick={doCashout} 
+                  className="px-6 py-3 rounded-xl bg-gradient-to-r from-green-500 to-emerald-500 text-white font-bold text-sm hover:scale-105 transition-all transform shadow-lg shadow-green-500/50"
+                >
+                  💰 Cash Out (€{cashout})
+                </button>
+              </div>
+            )}
+            
+            {(lost || (!active && rows.length>0)) && (
+              <button 
+                onClick={reset} 
+                className="px-6 py-3 rounded-xl bg-gradient-to-r from-gray-600 to-gray-700 text-white font-bold text-sm hover:scale-105 transition-all transform shadow-lg"
+              >
+                🔄 New Game
+              </button>
+            )}
+          </div>
+          
+          {/* Enhanced game grid */}
+          <div className="relative overflow-hidden rounded-2xl bg-gray-900/50 p-4 min-h-[280px] lg:min-h-[420px]">
+            <div key={animKey} className="flex flex-col-reverse gap-2 lg:gap-4 transition-all">
+              {rows.slice(-8).map((row,ri,arr)=>{ 
+                const globalIndex = rows.length - arr.length + ri; 
+                const isCurrent = globalIndex===level; 
+                const prev = globalIndex<level; 
+                
+                return (
+                  <div key={globalIndex} className="flex justify-center gap-2 lg:gap-4">
+                    <div className="w-8 flex items-center justify-center">
+                      <span className="text-xs text-purple-300 font-semibold">{12-globalIndex}</span>
+                    </div>
+                    {row.map((cell,i)=>{
+                      const revealed = cell.revealed || prev || !active || lost;
+                      const isBombAnim = bombAnim?.row === globalIndex && bombAnim?.col === i;
+                      const isGemAnim = gemAnim?.row === globalIndex && gemAnim?.col === i;
+                      
+                      return (
+                        <button 
+                          key={cell.id} 
+                          disabled={!isCurrent || lost} 
+                          onClick={()=>reveal(i)} 
+                          className={`
+                            w-14 h-14 sm:w-16 sm:h-16 lg:w-20 lg:h-20 rounded-lg border-2 flex items-center justify-center text-2xl lg:text-3xl font-bold transition-all transform relative
+                            ${isCurrent ? 'hover:scale-110 hover:shadow-lg cursor-pointer' : ''}
+                            ${revealed 
+                              ? cell.bomb 
+                                ? 'bg-gradient-to-br from-red-600 to-red-800 border-red-400/50 text-white shadow-lg shadow-red-500/50' 
+                                : `bg-gradient-to-br ${currentConfig.color} border-yellow-400/50 text-white shadow-lg shadow-yellow-500/50`
+                              : isCurrent
+                                ? 'bg-gradient-to-br from-purple-600 to-indigo-600 border-purple-400/50 hover:from-purple-500 hover:to-indigo-500 shadow-lg shadow-purple-500/30'
+                                : prev
+                                  ? 'bg-gradient-to-br from-gray-700 to-gray-800 border-gray-600/30 opacity-70'
+                                  : 'bg-gradient-to-br from-gray-800 to-gray-900 border-gray-700/30'
+                            }
+                            ${isBombAnim ? 'animate-pulse' : ''}
+                            ${isGemAnim ? 'animate-bounce' : ''}
+                          `}
+                        >
+                          {revealed 
+                            ? cell.bomb 
+                              ? '�' 
+                              : currentConfig.emoji
+                            : isCurrent 
+                              ? <span className="text-purple-200 text-sm animate-pulse">?</span>
+                              : ''
+                          }
+                          
+                          {/* Explosion effect */}
+                          {isBombAnim && (
+                            <div className="absolute inset-0 bg-red-500/50 rounded-lg animate-ping"></div>
+                          )}
+                          
+                          {/* Gem effect */}
+                          {isGemAnim && (
+                            <div className="absolute inset-0 bg-yellow-400/30 rounded-lg animate-ping"></div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ); 
+              })}
+            </div>
+          </div>
+          
+          {/* Enhanced status messages */}
+          <div className="text-center space-y-3">
+            <div className="flex justify-center gap-4 text-sm">
+              <div className="px-3 py-2 bg-gray-800/60 rounded-lg border border-purple-500/30">
+                Balance: <span className="text-green-400 font-semibold">€{balance}</span>
+              </div>
+              {active && !lost && (
+                <div className="px-3 py-2 bg-gray-800/60 rounded-lg border border-purple-500/30">
+                  Potential Win: <span className="text-yellow-400 font-semibold">€{cashout}</span>
+                </div>
+              )}
+            </div>
+            
+            {lost && (
+              <div className="p-4 rounded-xl bg-gradient-to-r from-red-500/20 to-rose-500/20 border border-red-400/50 backdrop-blur">
+                <div className="text-xl font-bold text-red-400 mb-2">💀 DRAGON ATTACK! 💀</div>
+                <div className="text-sm text-gray-400">The dragon's trap got you at level {level}!</div>
+              </div>
+            )}
+            
+            {!lost && !active && rows.length>0 && level >= 12 && (
+              <div className="p-4 rounded-xl bg-gradient-to-r from-green-500/20 to-emerald-500/20 border border-green-400/50 backdrop-blur animate-pulse">
+                <div className="text-xl font-bold text-green-400 mb-2">🏆 TOWER CONQUERED! 🏆</div>
+                <div className="text-2xl font-bold text-yellow-400 animate-bounce">+€{cashout}</div>
+                <div className="text-sm text-gray-400">You've reached the top of the Dragon Tower!</div>
+              </div>
+            )}
+            
+            {!lost && !active && rows.length>0 && level < 12 && (
+              <div className="p-4 rounded-xl bg-gradient-to-r from-yellow-500/20 to-orange-500/20 border border-yellow-400/50 backdrop-blur">
+                <div className="text-xl font-bold text-yellow-400 mb-2">💰 SUCCESSFUL ESCAPE! 💰</div>
+                <div className="text-2xl font-bold text-green-400">+€{cashout}</div>
+                <div className="text-sm text-gray-400">Smart move! You escaped with {(cashout/bet).toFixed(2)}x multiplier!</div>
+              </div>
+            )}
+            
+            {active && !lost && (
+              <div className="text-xs text-gray-400 bg-gray-800/40 rounded-lg p-3">
+                <span className="text-purple-300 font-semibold">🐲 Dragon Tower:</span> Find safe gems {currentConfig.emoji} to climb higher. Avoid dragon traps 💀 or lose everything!
+              </div>
+            )}
+            
+            {!active && rows.length === 0 && (
+              <div className="text-sm text-gray-400 bg-gray-800/40 rounded-lg p-4 border border-gray-700/30">
+                <div className="font-semibold text-purple-300 mb-2">🐲 How to Climb the Dragon Tower:</div>
+                <ul className="text-left space-y-1 max-w-md mx-auto">
+                  <li>• Choose your bet and difficulty level</li>
+                  <li>• Click safe tiles to climb each level</li>
+                  <li>• Higher levels = bigger multipliers</li>
+                  <li>• Cash out anytime or risk it all for the top!</li>
+                  <li>• Avoid dragon traps or lose your bet!</li>
+                </ul>
+              </div>
+            )}
           </div>
         </div>
       );
@@ -1644,7 +3131,8 @@
 
     function MinesGame({ balance, setBalance }){
       const size = 5;
-      const [bet, setBet] = useState(50);
+  // store as string so mobile users can clear the field while typing (prevents forced '1')
+  const [betInput, setBetInput] = useState('50');
       const [mines, setMines] = useState(3);
       const [state, setState] = useState('idle');
       const [opened, setOpened] = useState([]);
@@ -1712,7 +3200,8 @@
       
       const start = async ()=>{
         if (state === 'active') return;
-        if (bet <= 0 || bet > balance) return;
+        const numericBet = parseInt(betInput, 10) || 0;
+        if (numericBet <= 0 || numericBet > balance) return;
         const indices = new Set();
         let i = 0;
         while (indices.size < mines && i < 5000){
@@ -1727,15 +3216,15 @@
           const arr = Array.from(indices);
           localStorage.setItem('gambl_admin_bombs', JSON.stringify({ bombs: arr, size: total }));
         } catch(e) { /* ignore storage errors */ }
-        setOpened([]);
-        setNonce(nonce+1);
-        setState('active');
-        setBalance(balance - bet);
+  setOpened([]);
+  setNonce(nonce+1);
+  setState('active');
+  setBalance(balance - numericBet);
         setRevealAll(false);
         setGameResult(null);
       };
       
-      const reveal = (idx)=>{
+  const reveal = (idx)=>{
         if (state !== 'active') return;
         if (opened.includes(idx)) return;
         if (revealingTile !== null) return; // Prevent multiple clicks during animation
@@ -1744,14 +3233,15 @@
         
         setTimeout(() => {
           const hitBomb = bombs.has(idx);
-          if (hitBomb){
+      if (hitBomb){
             setState('busted');
             setOpened(o=>[...o, idx]);
             playSound('bomb');
             setRevealingTile(null);
             // Show game end popup after bomb animation
             setTimeout(() => {
-              setGameResult({ type: 'loss', amount: bet, message: 'You hit a mine!' });
+        const numericBet = parseInt(betInput, 10) || 0;
+        setGameResult({ type: 'loss', amount: numericBet, message: 'You hit a mine!' });
               setShowGameEndPopup(true);
               setRevealAll(true);
               playSound('reveal-all');
@@ -1766,13 +3256,14 @@
       
       const cashout = ()=>{
         if (state !== 'active') return;
-        const win = Math.floor(bet * multiplier);
+        const numericBet = parseInt(betInput, 10) || 0;
+        const win = Math.floor(numericBet * multiplier);
         // Immediately apply winnings and mark cashed state
         setBalance(b=>b+win);
         setState('cashed');
 
         // Show immediate game end popup with results
-        const profit = win - bet;
+        const profit = win - numericBet;
         setGameResult({ 
           type: 'win', 
           amount: profit, 
@@ -1813,18 +3304,22 @@
       
       return (
         <section className="flex flex-col items-center justify-center w-full">
-          <div className="bg-slate-900 rounded-2xl p-3 sm:p-4 shadow space-y-3 sm:space-y-4 w-full max-w-md mx-auto">
+          <div className="bg-slate-900 rounded-2xl p-3 sm:p-4 shadow space-y-3 sm:space-y-4 w-full max-w-xl lg:max-w-2xl mx-auto">
             <h2 className="text-xl font-semibold text-center">Mines</h2>
             
             <div className="grid grid-cols-2 sm:flex sm:flex-row items-center gap-2 sm:gap-3 text-sm">
               <label className="text-slate-400">Bet</label>
               <input 
-                type="number" 
-                inputMode="decimal"
-                value={bet} 
-                min={1} 
-                max={balance} 
-                onChange={e=>setBet(Math.max(1, Number(e.target.value||1)))} 
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={betInput}
+                placeholder="50"
+                onChange={e=>{
+                  // allow clearing the field while typing; strip non-digits
+                  const v = e.target.value.replace(/\D/g,'');
+                  setBetInput(v);
+                }}
                 className="w-full sm:w-24 bg-slate-800 rounded-lg px-2 py-2 outline-none mobile-touch-target"
               />
               <label className="ml-0 sm:ml-4 text-slate-400">Mines</label>
@@ -1901,7 +3396,7 @@
           {/* Game End Popup */}
           {showGameEndPopup && gameResult && (
             <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/30 backdrop-blur-sm animate-fade-in">
-              <div className={`flex flex-col items-center justify-center rounded-2xl shadow-2xl px-4 sm:px-8 py-6 sm:py-10 animate-bounce-in border-4 w-full max-w-xs sm:max-w-sm ${
+              <div className={`flex flex-col items-center justify-center rounded-2xl shadow-2xl px-4 sm:px-8 py-6 sm:py-10 animate-bounce-in border-4 w-full max-w-sm sm:max-w-md lg:max-w-lg ${
                 gameResult.type === 'win' 
                   ? 'bg-slate-900/85 border-emerald-400' 
                   : 'bg-slate-900/85 border-rose-400'
@@ -1958,7 +3453,7 @@
       const [result, setResult] = useState(null);
       const [balls, setBalls] = useState([]);
       const [isDropping, setIsDropping] = useState(false);
-      const boardRef = useRef(null);
+  // boardRef removed (not needed for rendering); avoid passing refs to function components
   const animationRef = useRef(null);
   const rafsRef = useRef(new Set());
       const { clientSeed, serverSeedHash, revealServerSeed, nonce, setNonce, rng } = useFairSeeds();
@@ -2262,7 +3757,8 @@
       }, []);
 
       return (
-        <div className="flex flex-col lg:flex-row gap-4 lg:gap-6 max-w-7xl mx-auto">
+        // On mobile show board first then controls (flex-col-reverse), on large screens keep controls left
+        <div className="flex flex-col-reverse lg:flex-row gap-4 lg:gap-6 max-w-7xl mx-auto">
           {/* Left Control Panel - Stake.com style */}
           <div className="w-full lg:w-80 bg-slate-800/60 rounded-2xl p-4 lg:p-6 h-fit">
             {/* Manual/Auto Tabs */}
@@ -2371,9 +3867,8 @@
 
           {/* Main Game Area */}
           <div className="flex-1 overflow-x-auto">
-            <div className="min-w-[350px]">
+            <div className="min-w-[300px]">
               <PlinkoBoard 
-                ref={boardRef}
                 rows={rows_setting} 
                 activePath={lastPath} 
                 finalSlot={result?.slot ?? null} 
@@ -2423,7 +3918,8 @@
       }, [rows]);
 
   // Debug toggle: draws collision circles for pegs/balls to verify physics alignment
-  const DEBUG_COLLISIONS = true;
+  // Turned off for production visuals; enable for development only
+  const DEBUG_COLLISIONS = false;
       
       // Generate slot positions
       const slots = useMemo(() => {
@@ -2461,12 +3957,7 @@
             <div className="text-white text-lg font-semibold">Plinko Board</div>
           </div>
 
-          <div className="relative bg-slate-800 rounded-xl p-2 sm:p-4 mx-auto overflow-hidden" style={{ 
-            width: '100%',
-            maxWidth: boardWidth + 40,
-            height: 'auto',
-            aspectRatio: `${(boardWidth + 40) / (boardHeight + 40)}` 
-          }}>
+          <div className="relative bg-slate-800 rounded-xl p-2 sm:p-4 mx-auto overflow-hidden w-full max-w-[1100px] h-[50vh] sm:h-[60vh] md:h-[68vh] lg:h-[720px]">
             {/* SVG Game Board */}
             <svg 
               ref={svgRef}
@@ -2643,21 +4134,14 @@
             </div>
           </div>
           
-          {/* Multiplier labels below board */}
-          <div className="flex justify-center mt-3">
-            <div className="grid grid-cols-9 gap-1 text-xs">
-              {multipliers.slice(0, 9).map((mult, i) => (
-                <div key={i} className={`text-center px-1 ${finalSlot === i ? 'text-yellow-400 font-bold' : 'text-slate-400'}`}>
-                  {mult}x
-                </div>
-              ))}
-            </div>
-          </div>
+          {/* External multiplier pill row removed to avoid duplication — use SVG slot visuals only */}
         </div>
       );
     }
 
-    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    function mountApp(){ const rootEl = document.getElementById('root'); if(!rootEl){ console.warn('React mount: #root not found'); return; } ReactDOM.createRoot(rootEl).render(<App />); }
+    if (document.readyState === 'loading') window.addEventListener('DOMContentLoaded', mountApp); else mountApp();
   </script>
+  <div id="root"></div>
 </body>
 </html>
