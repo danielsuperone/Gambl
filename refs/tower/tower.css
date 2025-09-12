@@ -1,0 +1,483 @@
+@keyframes Tower_iconShow__3cF4O {
+    0% {
+        transform: scale(0)
+    }
+
+    to {
+        transform: scale(1)
+    }
+}
+
+.Tower_main__iN2dk {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 32px 32px 0
+}
+
+.Tower_content__cMnpm {
+    max-width: 1200px;
+    width: 100%
+}
+
+.Tower_game__yaqFe {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    padding: 15px;
+    gap: 15px;
+    border-radius: 24px;
+    background: var(--dark-block)
+}
+
+.Tower_gameLeft__JLlyx {
+    min-width: 320px;
+    width: 320px;
+    background-color: var(--dark-bg);
+    border-radius: 16px;
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px
+}
+
+.Tower_gameRight__GQ2n8 {
+    position: relative;
+    width: 835px;
+    min-width: 835px;
+    height: 610px;
+    min-height: 610px;
+    background-color: var(--dark-bg)
+}
+
+.Tower_gameRightOver__LkYAK,.Tower_gameRight__GQ2n8 {
+    overflow: hidden;
+    aspect-ratio: 835/610;
+    border-radius: 16px
+}
+
+.Tower_gameRightOver__LkYAK {
+    display: flex;
+    justify-content: center;
+    align-items: center
+}
+
+.Tower_balance__F67C3 {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: Proxima Nova Rg;
+    font-weight: 700;
+    font-size: 17px;
+    line-height: 21px
+}
+
+.Tower_balance__F67C3 span {
+    color: var(--light-title)!important
+}
+
+.Tower_balanceRight__QV1DS {
+    display: flex;
+    justify-content: center;
+    align-items: center
+}
+
+.Tower_balanceRight__QV1DS svg {
+    margin-right: 8px;
+    width: 21px;
+    height: auto;
+    color: var(--light-desc)
+}
+
+.Tower_balanceRight__QV1DS span {
+    color: var(--light-desc)!important
+}
+
+.Tower_balanceSkeleton__QhlzO {
+    width: 120px;
+    height: 21px;
+    border-radius: 100px
+}
+
+.Tower_top__NVYqQ {
+    position: relative;
+    overflow: hidden;
+    width: 100%;
+    height: 61px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-left: 12px;
+    background-color: var(--game-dark)
+}
+
+.Tower_topShadow__4DOR8 {
+    position: absolute;
+    right: 0;
+    width: 126px;
+    height: 61px;
+    background: linear-gradient(90deg,rgba(9,12,26,0),#090C1A);
+    z-index: 2;
+    -webkit-transform: translateZ(0)
+}
+
+.Tower_gameResult__Xr2_z {
+    padding: 0 16px;
+    height: 37px;
+    border-radius: 12px;
+    background: var(--dark-block);
+    color: var(--light-desc);
+    font-family: Proxima Nova Rg;
+    font-weight: 700;
+    font-size: 17px;
+    line-height: 21px;
+    letter-spacing: -.03em;
+    display: flex;
+    justify-content: center;
+    align-items: center
+}
+
+.Tower_gameResult__Xr2_z.Tower_win__7zsP4 {
+    background: var(--primary-accent);
+    color: var(--primary-title)
+}
+
+.Tower_gameIn__wjrrT {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    user-select: none;
+    position: relative;
+    width: 100%;
+    height: calc(100% - 61px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden
+}
+
+.Tower_center__bdJhT {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: flex-end;
+    padding: 0 0 6px;
+    gap: 10px
+}
+
+.Tower_bet__qrdAL {
+    transition-duration: .3s
+}
+
+.Tower_bet__qrdAL:hover:not(:disabled) {
+    transform: scale(.95)
+}
+
+.Tower_bet__qrdAL:disabled {
+    cursor: not-allowed
+}
+
+.Tower_cashOut__Hrucy {
+    display: flex;
+    flex-direction: column;
+    font-family: Proxima Nova Rg;
+    font-weight: 700;
+    font-size: 17px;
+    line-height: 21px;
+    color: var(--primary-title)
+}
+
+.Tower_cashOut__Hrucy span:last-child {
+    font-family: Proxima Nova Rg;
+    font-weight: 700;
+    font-size: 13px;
+    line-height: normal
+}
+
+.Tower_winOver__fg_c4 {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition-duration: .3s;
+    transition-timing-function: cubic-bezier(.34,1.56,.64,1);
+    z-index: 5;
+    -webkit-transform: translateZ(0);
+    background-color: color-mix(in srgb,var(--dark-bg) 25%,transparent 25%)
+}
+
+.Tower_winOver__fg_c4.Tower_active__D77XQ {
+    opacity: 1;
+    visibility: visible
+}
+
+.Tower_winTab__1a9oQ {
+    margin-top: -60px;
+    transform: scale(.5);
+    width: 157px;
+    height: 117px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    background: var(--dark-on);
+    border: 2px solid var(--primary-accent);
+    border-radius: 20px;
+    transition-timing-function: cubic-bezier(.34,1.56,.64,1);
+    transition-duration: .3s
+}
+
+.Tower_winTop__Pt9hf {
+    font-size: 25px;
+    line-height: 30px
+}
+
+.Tower_winBottom__49G67,.Tower_winTop__Pt9hf {
+    font-family: Proxima Nova Rg;
+    font-weight: 700;
+    letter-spacing: -.03em;
+    color: var(--primary-accent)
+}
+
+.Tower_winBottom__49G67 {
+    font-size: 19px;
+    line-height: 23px
+}
+
+.Tower_winDelim__zk1DR {
+    width: 93px;
+    height: 1px;
+    border-radius: 2px;
+    background-color: var(--win-delim)
+}
+
+.Tower_winOver__fg_c4.Tower_active__D77XQ .Tower_winTab__1a9oQ {
+    transform: scale(1)
+}
+
+.Tower_minesPad__SS6m7 {
+    flex-direction: column;
+    gap: 6px;
+    padding: 36px 14px 14px;
+    background-color: var(--dark-bg);
+    border-radius: 24px;
+    border: 1px solid var(--dark-block);
+    z-index: 2;
+    -webkit-transform: translateZ(0)
+}
+
+.Tower_minesPad__SS6m7,.Tower_minesRow__85VhE {
+    display: flex;
+    justify-content: center;
+    align-items: center
+}
+
+.Tower_minesRow__85VhE {
+    position: relative;
+    gap: 10px
+}
+
+.Tower_mine__DSj_M {
+    border: none;
+    outline: none;
+    margin-top: 4px;
+    background-color: var(--dark-block);
+    cursor: pointer
+}
+
+.Tower_mineIn__7NFCI,.Tower_mine__DSj_M {
+    position: relative;
+    display: flex;
+    width: 92px;
+    height: 44px;
+    border-radius: 12px
+}
+
+.Tower_mineIn__7NFCI {
+    overflow: hidden;
+    background-color: var(--dark-on);
+    transition-duration: .3s;
+    transform: translateY(-4px);
+    justify-content: center;
+    align-items: center
+}
+
+.Tower_mineIn__7NFCI:hover {
+    transform: translateY(0)
+}
+
+.Tower_mine__DSj_M:disabled .Tower_mineIn__7NFCI {
+    transform: translateY(0);
+    background-color: var(--dark-block);
+    cursor: not-allowed
+}
+
+.Tower_anim__C5H8r {
+    -webkit-user-drag: none;
+    width: 58px;
+    animation: Tower_iconShow__3cF4O .6s cubic-bezier(.34,1.56,.64,1) 1 running
+}
+
+.Tower_bottomOver__sLBBq {
+    position: relative;
+    display: flex
+}
+
+.Tower_dropdownOver__IUPa9 {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 10px
+}
+
+.Tower_eggFiller__OxFvm {
+    position: absolute;
+    opacity: 0;
+    width: auto;
+    height: 38px;
+    transition-duration: .3s
+}
+
+.Tower_greenEgg__ijPiE:not(.Tower_highlight__zQ2Bx) .Tower_eggFiller__OxFvm.Tower_green__edd6J,.Tower_redEgg__uVPq0:not(.Tower_highlight__zQ2Bx) .Tower_eggFiller__OxFvm.Tower_red__0_p1M {
+    opacity: .25
+}
+
+.Tower_highlight__zQ2Bx .Tower_mineIn__7NFCI .Tower_lottie__GP1bs {
+    opacity: 1!important
+}
+
+.Tower_dragon__xX349 {
+    --eye: #0B0E1F;
+    --tooth: #455185;
+    --opacity: 0;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: auto
+}
+
+.Tower_dragon__xX349,.Tower_dragon__xX349 path {
+    transition-duration: .3s
+}
+
+.Tower_dragon__xX349.Tower_green__edd6J {
+    --eye: #01FF80;
+    --tooth: #01FF80;
+    --opacity: 1
+}
+
+.Tower_dragon__xX349.Tower_red__0_p1M {
+    --eye: #FF3355;
+    --tooth: #FF3355;
+    --opacity: 1
+}
+
+.Tower_multiplier__yov9K {
+    --border: #313752;
+    position: absolute;
+    top: -18px;
+    width: 128px;
+    height: 22px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    pointer-events: none
+}
+
+.Tower_multiplier__yov9K path {
+    transition-duration: .3s
+}
+
+.Tower_multiplier__yov9K.Tower_green__edd6J {
+    --border: #01FF80
+}
+
+.Tower_multiplier__yov9K.Tower_red__0_p1M {
+    --border: #FF3355
+}
+
+.Tower_multiplier__yov9K span {
+    position: absolute;
+    color: var(--border);
+    font-family: Proxima Nova Rg;
+    font-weight: 800;
+    font-size: 13px;
+    line-height: 16px;
+    transition-duration: .3s
+}
+
+.Tower_noWins__9JLJo {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-family: Proxima Nova Rg;
+    font-style: normal;
+    font-weight: 700;
+    font-size: 17px;
+    line-height: 21px;
+    letter-spacing: -.03em;
+    text-transform: capitalize;
+    color: var(--light-desc)
+}
+
+.Tower_mobile__ZurAh {
+    display: none!important
+}
+
+@media (max-width: 1344px) {
+    .Tower_main__iN2dk {
+        padding:10px 10px 0
+    }
+
+    .Tower_content__cMnpm {
+        max-width: 912px
+    }
+
+    .Tower_game__yaqFe {
+        padding: 8px;
+        border-radius: 16px;
+        flex-direction: column-reverse;
+        gap: 8px
+    }
+
+    .Tower_gameLeft__JLlyx {
+        background-color: transparent;
+        padding: 8px;
+        width: 100%;
+        max-width: 100%;
+        min-width: auto;
+        gap: 12px
+    }
+
+    .Tower_balance__F67C3 {
+        font-size: 14px;
+        line-height: normal
+    }
+
+    .Tower_balanceRight__QV1DS svg {
+        width: 17px;
+        height: auto;
+        margin-right: 6px
+    }
+
+    .Tower_notMobile__mTtzw {
+        display: none!important
+    }
+
+    .Tower_mobile__ZurAh {
+        display: flex!important
+    }
+}

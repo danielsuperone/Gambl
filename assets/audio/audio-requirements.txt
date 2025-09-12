@@ -1,0 +1,102 @@
+GAMBL - Audio Requirements & File Naming Convention
+=================================================
+
+BLACKJACK GAME SOUNDS:
+----------------------
+blackjack-card-flip.mp3/.wav/.ogg    - Card dealing/flipping sound
+blackjack-card-slide.mp3/.wav/.ogg   - Card sliding on table
+blackjack-chip-place.mp3/.wav/.ogg   - Placing bet chips
+blackjack-chip-stack.mp3/.wav/.ogg   - Stacking/collecting chips
+blackjack-win.mp3/.wav/.ogg          - Winning hand celebration
+blackjack-lose.mp3/.wav/.ogg         - Losing hand sound
+blackjack-push.mp3/.wav/.ogg         - Push/tie result
+blackjack-blackjack.mp3/.wav/.ogg    - Natural blackjack win
+blackjack-bust.mp3/.wav/.ogg         - Bust sound effect
+blackjack-double.mp3/.wav/.ogg       - Double down action
+blackjack-split.mp3/.wav/.ogg        - Split cards action
+blackjack-insurance.mp3/.wav/.ogg    - Insurance bet sound
+blackjack-shuffle.mp3/.wav/.ogg      - Card shuffle between rounds
+
+DICE GAME SOUNDS:
+-----------------
+dice-bet.mp3/.wav/.ogg               - Placing bet sound
+dice-slider.mp3/.wav/.ogg            - Moving slider/dragger
+dice-switch.mp3/.wav/.ogg            - Switching roll over/under
+dice-win.mp3/.wav/.ogg               - Winning roll sound
+dice-lose.mp3/.wav/.ogg              - Losing roll sound
+dice-roll.mp3/.wav/.ogg              - Dice rolling sound effect
+dice-click.mp3/.wav/.ogg             - UI click/button press
+
+MINES GAME SOUNDS:
+------------------
+mines-click.mp3/.wav/.ogg            - Tile click/reveal
+mines-mine-explode.mp3/.wav/.ogg     - Mine explosion
+mines-gem-found.mp3/.wav/.ogg        - Safe tile/gem discovery
+mines-cashout.mp3/.wav/.ogg          - Successful cashout
+mines-game-start.mp3/.wav/.ogg       - New game start
+
+PLINKO GAME SOUNDS:
+-------------------
+plinko-ball-drop.mp3/.wav/.ogg       - Ball drop/release
+plinko-peg-bounce.mp3/.wav/.ogg      - Ball bouncing off pegs
+plinko-slot-land.mp3/.wav/.ogg       - Ball landing in multiplier slot
+plinko-big-win.mp3/.wav/.ogg         - High multiplier win
+
+CRASH GAME SOUNDS:
+------------------
+crash-takeoff.mp3/.wav/.ogg          - Rocket takeoff
+crash-flying.mp3/.wav/.ogg           - Rocket flying (loopable)
+crash-explosion.mp3/.wav/.ogg        - Crash explosion
+crash-cashout.mp3/.wav/.ogg          - Manual cashout success
+crash-engine.mp3/.wav/.ogg           - Rocket engine ambient
+
+TOWER GAME SOUNDS:
+------------------
+tower-bet.mp3/.wav/.ogg              - Placing bet sound
+tower-egg-click.mp3/.wav/.ogg        - Clicking on egg/tile
+tower-egg-safe.mp3/.wav/.ogg         - Revealing safe egg (green)
+tower-egg-danger.mp3/.wav/.ogg       - Revealing danger egg (red)
+tower-cashout.mp3/.wav/.ogg          - Manual cashout success
+tower-level-up.mp3/.wav/.ogg         - Advancing to next level
+tower-game-start.mp3/.wav/.ogg       - Starting new game
+tower-game-over.mp3/.wav/.ogg        - Game over/crash sound
+tower-win.mp3/.wav/.ogg              - Completing tower win
+tower-dragon-appear.mp3/.wav/.ogg    - Dragon animation sound
+tower-multiplier.mp3/.wav/.ogg       - Multiplier increase sound
+
+GENERAL UI SOUNDS:
+------------------
+ui-button-click.mp3/.wav/.ogg        - General button clicks
+ui-button-hover.mp3/.wav/.ogg        - Button hover feedback
+ui-navigation.mp3/.wav/.ogg          - Menu/navigation sounds
+ui-notification.mp3/.wav/.ogg        - General notifications
+ui-error.mp3/.wav/.ogg              - Error/invalid action
+ui-success.mp3/.wav/.ogg            - Success confirmation
+
+AUDIO FORMAT RECOMMENDATIONS:
+-----------------------------
+- Primary: MP3 (best browser compatibility)
+- Secondary: OGG (good compression, open source)
+- Fallback: WAV (uncompressed, larger files)
+
+VOLUME GUIDELINES:
+------------------
+- Keep all audio files normalized to similar volume levels
+- UI sounds: lighter, subtle (around -20dB to -15dB)
+- Game action sounds: moderate (around -12dB to -8dB)
+- Win/celebration sounds: can be louder (around -6dB to -3dB)
+- Ambient/background: very quiet (around -25dB to -20dB)
+
+TECHNICAL NOTES:
+----------------
+- Max file size per audio: 500KB recommended for web performance
+- Sample rate: 44.1kHz or 48kHz
+- Bit rate: 128kbps to 192kbps for MP3
+- Duration: Most effects should be 0.5-3 seconds (except ambient loops)
+- Ensure files are web-optimized and compressed
+
+IMPLEMENTATION:
+---------------
+Audio files will be loaded via HTML5 Audio API and integrated into each game component.
+Volume controls and mute options will be available in the UI.
+All audio will have fallback silence for users who prefer no sound.

@@ -1,20 +1,19 @@
 {
   "name": "Gambl",
   "short_name": "Gambl",
-  "description": "Fun and easy way to play",
-  "start_url": ".",
+  "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#0f172a",
   "icons": [
     {
-      "src": "assets/logo.png",
+      "src": "logo.png",
       "sizes": "192x192",
       "type": "image/png"
     },
     {
-      "src": "assets/logo.ico",
-      "sizes": "48x48 32x32 16x16",
+      "src": "logo.ico",
+      "sizes": "48x48",
       "type": "image/x-icon"
     }
   ]
